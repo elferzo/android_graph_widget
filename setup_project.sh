@@ -9,7 +9,7 @@ mkdir -p $SRC/res/layout
 mkdir -p $SRC/res/xml
 mkdir -p $SRC/res/values
 
-cp CalorieChartWidget.kt  $SRC/kotlin/$PKG/
+cp GraphWidget.kt  $SRC/kotlin/$PKG/
 cp MainActivity.kt        $SRC/kotlin/$PKG/
 cp BootReceiver.kt        $SRC/kotlin/$PKG/
 cp widget_layout.xml      $SRC/res/layout/widget_calorie_chart.xml
