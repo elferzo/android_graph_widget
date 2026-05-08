@@ -39,42 +39,39 @@ class CalorieChartWidget : AppWidgetProvider() {
             val W = 800; val H = 300
             val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
-            canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
 
-            // ── Фон виджета ──────────────────────────────────────────────
-            Paint(Paint.ANTI_ALIAS_FLAG).also {
-                it.color = Color.parseColor("#1A1A2E"); it.style = Paint.Style.FILL
-                canvas.drawRoundRect(0f, 0f, W.toFloat(), H.toFloat(), 18f, 18f, it)
-            }
+            // ── Весь bitmap = серая область построения, без отступов ─────
+            // Снаружи ничего нет — Samsung не сможет залить своим фоном
+            canvas.drawColor(Color.parseColor("#22222E"))
 
             // ── Геометрия ────────────────────────────────────────────────
-            val padL = 58f; val padR = 12f; val padT = 22f; val padB = 18f
-            val cW = W - padL - padR
-            val cH = H - padT - padB
+            // Подписи оси Y рисуются внутри, у левого края
+            val labW = 58f   // ширина зоны подписей (внутри серого)
+            val padR = 12f
+            val padT = 22f; val padB = 18f
+
+            val plotL = labW             // левая граница линий/точек
+            val plotR = W - padR
+            val plotT = padT
+            val plotB = H - padB
+            val cW = plotR - plotL
+            val cH = plotB - plotT
 
             val yMin = 0f; val yMax = 100f
-            val n = weekData.size  // 7
-            // rightPad в единицах шага — бокс today занимает 0.55 шага справа
+            val n = weekData.size        // 7
             val todayRightExtra = 0.55f
             val xRange = (n - 1).toFloat() + todayRightExtra
 
-            fun yPx(v: Float) = padT + cH * (1f - (v - yMin) / (yMax - yMin))
-            fun xPx(i: Float) = padL + (i / xRange) * cW
+            fun yPx(v: Float) = plotT + cH * (1f - (v - yMin) / (yMax - yMin))
+            fun xPx(i: Float) = plotL + (i / xRange) * cW
 
-            // ── Серая заливка области построения ────────────────────────
-            val plotRect = RectF(padL, padT, padL + cW, padT + cH)
-            Paint(Paint.ANTI_ALIAS_FLAG).also {
-                it.color = Color.parseColor("#22222E"); it.style = Paint.Style.FILL
-                canvas.drawRect(plotRect, it)
-            }
-
-            // ── Тонкая чёрная рамка области ──────────────────────────────
+            // ── Тонкая чёрная рамка вокруг всего bitmap ──────────────────
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.BLACK; it.style = Paint.Style.STROKE; it.strokeWidth = 1.2f
-                canvas.drawRect(plotRect, it)
+                canvas.drawRect(0f, 0f, W.toFloat(), H.toFloat(), it)
             }
 
-            // ── Горизонтальные пунктиры (тихие, каждые 20%) ─────────────
+            // ── Горизонтальные пунктиры ───────────────────────────────────
             val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#55444455"); strokeWidth = 0.8f
                 pathEffect = DashPathEffect(floatArrayOf(9f, 8f), 0f)
@@ -83,27 +80,25 @@ class CalorieChartWidget : AppWidgetProvider() {
                 color = Color.parseColor("#778899"); textSize = 19f
                 textAlign = Paint.Align.RIGHT
             }
-            // Подписи только для 0, 60, 100
             val labeledTicks = setOf(0f, 60f, 100f)
             var g = 0f
             while (g <= 100f) {
                 val gy = yPx(g)
-                canvas.drawLine(padL + 1f, gy, padL + cW - 1f, gy, gridPaint)
+                canvas.drawLine(plotL, gy, plotR, gy, gridPaint)
                 if (g in labeledTicks) {
                     val label = if (g == 0f) "0" else "${g.toInt()}%"
-                    canvas.drawText(label, padL - 8f, gy + 7f, yLabelPaint)
+                    canvas.drawText(label, labW - 6f, gy + 7f, yLabelPaint)
                 }
                 g += 20f
             }
 
-            // ── TODAY box: светящийся контур, без заливки ────────────────
+            // ── TODAY box: светящийся контур, без заливки ─────────────────
             val todayIdx = n - 1
             val todayXc = xPx(todayIdx.toFloat())
             val halfL = cW / xRange * 0.46f
             val halfR = cW / xRange * 0.52f
-            val boxRF = RectF(todayXc - halfL, padT, todayXc + halfR, padT + cH)
+            val boxRF = RectF(todayXc - halfL, plotT, todayXc + halfR, plotB)
 
-            // Слои свечения
             for ((lw, alpha) in listOf(14f to 20, 9f to 40, 5f to 80, 2.5f to 140)) {
                 Paint(Paint.ANTI_ALIAS_FLAG).also {
                     it.color = Color.argb(alpha, 0x4C, 0xAF, 0x50)
@@ -111,22 +106,20 @@ class CalorieChartWidget : AppWidgetProvider() {
                     canvas.drawRoundRect(boxRF, 6f, 6f, it)
                 }
             }
-            // Пунктирный контур
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.parseColor("#4CAF50"); it.style = Paint.Style.STROKE
                 it.strokeWidth = 2f
                 it.pathEffect = DashPathEffect(floatArrayOf(8f, 5f), 0f)
                 canvas.drawRoundRect(boxRF, 6f, 6f, it)
             }
-            // "today" внутри бокса, сверху по центру
+            // "today" внутри бокса сверху
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.parseColor("#4CAF50"); it.textSize = 21f
                 it.typeface = Typeface.DEFAULT_BOLD; it.textAlign = Paint.Align.CENTER
-                val centerX = (boxRF.left + boxRF.right) / 2f
-                canvas.drawText("today", centerX, padT + 22f, it)
+                canvas.drawText("today", (boxRF.left + boxRF.right) / 2f, plotT + 22f, it)
             }
 
-            // ── Линия — все 7 точек соединены ────────────────────────────
+            // ── Линия — все 7 точек ───────────────────────────────────────
             val linePath = Path()
             for (i in 0 until n) {
                 val px = xPx(i.toFloat()); val py = yPx(weekData[i])
@@ -138,26 +131,22 @@ class CalorieChartWidget : AppWidgetProvider() {
                 canvas.drawPath(linePath, it)
             }
 
-            // ── Ромбы + подписи значений ──────────────────────────────────
+            // ── Ромбы + подписи ───────────────────────────────────────────
             val diamondFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#FFB300"); style = Paint.Style.FILL
             }
             for (i in 0 until n) {
                 val px = xPx(i.toFloat()); val py = yPx(weekData[i])
                 val isToday = (i == todayIdx)
-                val r = if (isToday) 11f else 8f
-                drawDiamond(canvas, px, py, r, diamondFill)
-
-                val txt = "${weekData[i].toInt()}%"
+                drawDiamond(canvas, px, py, if (isToday) 11f else 8f, diamondFill)
                 val lp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = Color.parseColor("#FFB300")
                     textSize = if (isToday) 21f else 18f
                     typeface = if (isToday) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                     textAlign = Paint.Align.CENTER
                 }
-                // подпись: сверху если точка выше 70%, снизу если ниже
                 val offY = if (weekData[i] >= 70f) py + 26f else py - 14f
-                canvas.drawText(txt, px, offY, lp)
+                canvas.drawText("${weekData[i].toInt()}%", px, offY, lp)
             }
 
             return bmp

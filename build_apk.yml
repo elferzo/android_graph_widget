@@ -23,17 +23,20 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Build APK
         run: |
+          chmod +x setup_project.sh && ./setup_project.sh
           cp root_build_gradle.txt build.gradle
           cp app_build_gradle.txt  app/build.gradle
-          chmod +x setup_project.sh && ./setup_project.sh
-          gradle wrapper --gradle-version=8.9
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          gradle assembleDebug
           mv app/build/outputs/apk/debug/app-debug.apk graph.apk
 
       - uses: actions/upload-artifact@v4
