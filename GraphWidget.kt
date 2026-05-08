@@ -10,18 +10,20 @@ import android.content.Intent
 import android.graphics.*
 import android.os.Bundle
 import android.widget.RemoteViews
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 class GraphWidget : AppWidgetProvider() {
 
     companion object {
         const val ACTION_UPDATE = "com.example.graphwidget.ACTION_UPDATE"
+        const val SERVER_URL    = "http://178.208.86.99:5001/recovery"
+        const val PREFS_NAME    = "graphwidget_prefs"
+        const val KEY_SCORES    = "last_scores"
 
-        // ═══════════════════════════════════════════════════════════════════
-        //  WHOOP DATA STUB — Phase 2: заменить данными с Whoop API
-        //  Ровно 7 значений 0–100 (%), индекс 6 = сегодня
-        // ═══════════════════════════════════════════════════════════════════
-        var weekData = floatArrayOf(62f, 78f, 45f, 88f, 71f, 55f, 83f)
-        // ═══════════════════════════════════════════════════════════════════
+        // Fallback пока нет данных с сервера
+        val DEFAULT_DATA = floatArrayOf(62f, 78f, 45f, 88f, 71f, 55f, 83f)
 
         fun updateWidgets(context: Context) {
             val awm = context.getSystemService(Context.APPWIDGET_SERVICE) as AppWidgetManager
@@ -30,24 +32,58 @@ class GraphWidget : AppWidgetProvider() {
         }
 
         fun updateWidget(context: Context, awm: AppWidgetManager, widgetId: Int) {
-            val rv = RemoteViews(context.packageName, R.layout.widget_calorie_chart)
-            rv.setImageViewBitmap(R.id.chart_image, buildChartBitmap())
-            // Убираем системный padding который Samsung добавляет
-            val options = Bundle().apply {
-                putInt(AppWidgetManager.OPTION_APPWIDGET_HOST_CATEGORY, 0)
-            }
-            awm.updateAppWidgetOptions(widgetId, options)
-            awm.updateAppWidget(widgetId, rv)
+            // Запускаем fetch в фоновом потоке
+            Thread {
+                val scores = fetchScores(context)
+                val rv = RemoteViews(context.packageName, R.layout.widget_calorie_chart)
+                rv.setImageViewBitmap(R.id.chart_image, buildChartBitmap(scores))
+                val options = Bundle()
+                awm.updateAppWidgetOptions(widgetId, options)
+                awm.updateAppWidget(widgetId, rv)
+            }.start()
         }
 
-        fun buildChartBitmap(): Bitmap {
+        fun fetchScores(context: Context): FloatArray {
+            return try {
+                val conn = URL(SERVER_URL).openConnection() as HttpURLConnection
+                conn.connectTimeout = 5000
+                conn.readTimeout    = 5000
+                conn.requestMethod  = "GET"
+
+                if (conn.responseCode == 200) {
+                    val body = conn.inputStream.bufferedReader().readText()
+                    val json = JSONObject(body)
+                    val arr  = json.getJSONArray("scores")
+                    val result = FloatArray(arr.length()) { arr.getDouble(it).toFloat() }
+                    // Кэшируем на случай офлайн
+                    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit().putString(KEY_SCORES, body).apply()
+                    result
+                } else {
+                    loadCachedScores(context)
+                }
+            } catch (e: Exception) {
+                loadCachedScores(context)
+            }
+        }
+
+        fun loadCachedScores(context: Context): FloatArray {
+            val cached = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(KEY_SCORES, null) ?: return DEFAULT_DATA
+            return try {
+                val arr = JSONObject(cached).getJSONArray("scores")
+                FloatArray(arr.length()) { arr.getDouble(it).toFloat() }
+            } catch (e: Exception) {
+                DEFAULT_DATA
+            }
+        }
+
+        fun buildChartBitmap(weekData: FloatArray = DEFAULT_DATA): Bitmap {
             val W = 800; val H = 300
             val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
-            // Полностью прозрачный фон
             canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
 
-            // ── Геометрия ────────────────────────────────────────────────
             val padL = 58f; val padR = 12f; val padT = 22f; val padB = 18f
             val plotRect = RectF(padL, padT, W - padR, H - padB)
 
@@ -60,19 +96,18 @@ class GraphWidget : AppWidgetProvider() {
             fun yPx(v: Float) = plotRect.top + cH * (1f - (v - yMin) / (yMax - yMin))
             fun xPx(i: Float) = plotRect.left + (i / xRange) * cW
 
-            // ── Серая заливка только области построения ──────────────────
+            // Серая заливка plotRect
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.parseColor("#22222E"); it.style = Paint.Style.FILL
                 canvas.drawRect(plotRect, it)
             }
-
-            // ── Тонкая чёрная рамка области ──────────────────────────────
+            // Чёрная рамка
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.BLACK; it.style = Paint.Style.STROKE; it.strokeWidth = 1.2f
                 canvas.drawRect(plotRect, it)
             }
 
-            // ── Горизонтальные пунктиры ───────────────────────────────────
+            // Горизонтальные пунктиры + подписи Y
             val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#55444455"); strokeWidth = 0.8f
                 pathEffect = DashPathEffect(floatArrayOf(9f, 8f), 0f)
@@ -85,15 +120,16 @@ class GraphWidget : AppWidgetProvider() {
             while (g <= 100f) {
                 val gy = yPx(g)
                 canvas.drawLine(plotRect.left, gy, plotRect.right, gy, gridPaint)
-                val label = if (g == 0f) "0" else "${g.toInt()}%"
-                if (g == 0f || g == 60f || g == 100f)
+                if (g == 0f || g == 60f || g == 100f) {
+                    val label = if (g == 0f) "0" else "${g.toInt()}%"
                     canvas.drawText(label, padL - 6f, gy + 7f, yLabelPaint)
+                }
                 g += 20f
             }
 
-            // ── TODAY box ─────────────────────────────────────────────────
+            // TODAY box — светящийся контур без заливки
             val todayIdx = n - 1
-            val todayXc = xPx(todayIdx.toFloat())
+            val todayXc  = xPx(todayIdx.toFloat())
             val halfL = cW / xRange * 0.46f
             val halfR = cW / xRange * 0.52f
             val boxRF = RectF(todayXc - halfL, plotRect.top, todayXc + halfR, plotRect.bottom)
@@ -116,7 +152,7 @@ class GraphWidget : AppWidgetProvider() {
                 canvas.drawText("today", (boxRF.left + boxRF.right) / 2f, plotRect.top + 22f, it)
             }
 
-            // ── Линия — все 7 точек ───────────────────────────────────────
+            // Линия — все точки
             val linePath = Path()
             for (i in 0 until n) {
                 val px = xPx(i.toFloat()); val py = yPx(weekData[i])
@@ -128,7 +164,7 @@ class GraphWidget : AppWidgetProvider() {
                 canvas.drawPath(linePath, it)
             }
 
-            // ── Ромбы + подписи ───────────────────────────────────────────
+            // Ромбы + подписи
             val diamondFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#FFB300"); style = Paint.Style.FILL
             }
@@ -163,7 +199,7 @@ class GraphWidget : AppWidgetProvider() {
                 Intent(context, GraphWidget::class.java).apply { action = ACTION_UPDATE },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            val fiveMin = 5 * 60 * 1000L
+            val fiveMin = 30 * 60 * 1000L
             try {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,
                     System.currentTimeMillis() + fiveMin, pi)
