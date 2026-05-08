@@ -8,4 +8,5 @@
     android:initialLayout="@layout/widget_calorie_chart"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
+    android:widgetFeatures="reconfigurable"
     android:description="@string/widget_description" />
