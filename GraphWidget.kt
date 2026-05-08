@@ -13,6 +13,8 @@ import android.widget.RemoteViews
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.*
 
 class GraphWidget : AppWidgetProvider() {
 
@@ -21,9 +23,7 @@ class GraphWidget : AppWidgetProvider() {
         const val SERVER_URL    = "http://178.208.86.99:5001/recovery"
         const val PREFS_NAME    = "graphwidget_prefs"
         const val KEY_SCORES    = "last_scores"
-
-        // Fallback пока нет данных с сервера
-        val DEFAULT_DATA = floatArrayOf(62f, 78f, 45f, 88f, 71f, 55f, 83f)
+        val DEFAULT_DATA = floatArrayOf(42f, 38f, 48f, 55f, 80f, 77f, 84f)
 
         fun updateWidgets(context: Context) {
             val awm = context.getSystemService(Context.APPWIDGET_SERVICE) as AppWidgetManager
@@ -32,13 +32,11 @@ class GraphWidget : AppWidgetProvider() {
         }
 
         fun updateWidget(context: Context, awm: AppWidgetManager, widgetId: Int) {
-            // Запускаем fetch в фоновом потоке
             Thread {
                 val scores = fetchScores(context)
                 val rv = RemoteViews(context.packageName, R.layout.widget_calorie_chart)
                 rv.setImageViewBitmap(R.id.chart_image, buildChartBitmap(scores))
-                val options = Bundle()
-                awm.updateAppWidgetOptions(widgetId, options)
+                awm.updateAppWidgetOptions(widgetId, Bundle())
                 awm.updateAppWidget(widgetId, rv)
             }.start()
         }
@@ -46,68 +44,93 @@ class GraphWidget : AppWidgetProvider() {
         fun fetchScores(context: Context): FloatArray {
             return try {
                 val conn = URL(SERVER_URL).openConnection() as HttpURLConnection
-                conn.connectTimeout = 5000
-                conn.readTimeout    = 5000
-                conn.requestMethod  = "GET"
-
+                conn.connectTimeout = 5000; conn.readTimeout = 5000
+                conn.requestMethod = "GET"
                 if (conn.responseCode == 200) {
                     val body = conn.inputStream.bufferedReader().readText()
-                    val json = JSONObject(body)
-                    val arr  = json.getJSONArray("scores")
+                    val arr  = JSONObject(body).getJSONArray("scores")
                     val result = FloatArray(arr.length()) { arr.getDouble(it).toFloat() }
-                    // Кэшируем на случай офлайн
                     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                         .edit().putString(KEY_SCORES, body).apply()
                     result
-                } else {
-                    loadCachedScores(context)
-                }
-            } catch (e: Exception) {
-                loadCachedScores(context)
-            }
+                } else loadCachedScores(context)
+            } catch (e: Exception) { loadCachedScores(context) }
         }
 
         fun loadCachedScores(context: Context): FloatArray {
-            val cached = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val s = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .getString(KEY_SCORES, null) ?: return DEFAULT_DATA
             return try {
-                val arr = JSONObject(cached).getJSONArray("scores")
+                val arr = JSONObject(s).getJSONArray("scores")
                 FloatArray(arr.length()) { arr.getDouble(it).toFloat() }
-            } catch (e: Exception) {
-                DEFAULT_DATA
-            }
+            } catch (e: Exception) { DEFAULT_DATA }
         }
 
         fun buildChartBitmap(weekData: FloatArray = DEFAULT_DATA): Bitmap {
-            val W = 800; val H = 300
+            val W = 800; val H = 340
             val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
             canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
 
-            val padL = 58f; val padR = 12f; val padT = 22f; val padB = 18f
+            // ── Даты 7 дней ───────────────────────────────────────────────
+            val sdf = SimpleDateFormat("dd.MM", Locale.getDefault())
+            val dates = Array(7) { i ->
+                sdf.format(Calendar.getInstance().apply {
+                    add(Calendar.DAY_OF_YEAR, -(6 - i))
+                }.time)
+            }
+
+            // ── Геометрия ─────────────────────────────────────────────────
+            val titleH = 36f
+            val padL   = 58f; val padR = 12f
+            val padT   = titleH + 4f
+            val padB   = 10f
+
             val plotRect = RectF(padL, padT, W - padR, H - padB)
+            val cW = plotRect.width(); val cH = plotRect.height()
 
             val yMin = 0f; val yMax = 100f
             val n = weekData.size
             val todayRightExtra = 0.55f
             val xRange = (n - 1).toFloat() + todayRightExtra
-            val cW = plotRect.width(); val cH = plotRect.height()
 
             fun yPx(v: Float) = plotRect.top + cH * (1f - (v - yMin) / (yMax - yMin))
             fun xPx(i: Float) = plotRect.left + (i / xRange) * cW
 
-            // Серая заливка plotRect
+            // ── Заголовок "recovery___________" (линия только справа) ────
+            val uPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#888899"); textSize = 24f
+                typeface = Typeface.MONOSPACE
+            }
+            val wPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE; textSize = 24f
+                typeface = Typeface.MONOSPACE
+            }
+            val titleY  = padT - 8f
+            val wordW   = wPaint.measureText("recovery")
+            val charW   = uPaint.measureText("_")
+            val leftU = "___"
+            val leftUW = uPaint.measureText(leftU)
+            val rightCount = ((W - padR - padL - leftUW - wordW) / charW).toInt()
+
+            canvas.drawText("___", padL, titleY, uPaint)
+            canvas.drawText("recovery", padL + uPaint.measureText("___"), titleY, wPaint)
+            canvas.drawText("_".repeat(rightCount), padL + leftUW + wordW, titleY, uPaint)
+
+            // ── Полупрозрачная заливка 50% ────────────────────────────────
             Paint(Paint.ANTI_ALIAS_FLAG).also {
-                it.color = Color.parseColor("#22222E"); it.style = Paint.Style.FILL
+                it.color = Color.argb(128, 0x22, 0x22, 0x2E)  // alpha=128 = 50%
+                it.style = Paint.Style.FILL
                 canvas.drawRect(plotRect, it)
             }
-            // Чёрная рамка
+
+            // ── Тонкая чёрная рамка ───────────────────────────────────────
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.BLACK; it.style = Paint.Style.STROKE; it.strokeWidth = 1.2f
                 canvas.drawRect(plotRect, it)
             }
 
-            // Горизонтальные пунктиры + подписи Y
+            // ── Горизонтальные пунктиры + подписи Y ──────────────────────
             val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#55444455"); strokeWidth = 0.8f
                 pathEffect = DashPathEffect(floatArrayOf(9f, 8f), 0f)
@@ -127,7 +150,7 @@ class GraphWidget : AppWidgetProvider() {
                 g += 20f
             }
 
-            // TODAY box — светящийся контур без заливки
+            // ── TODAY box ─────────────────────────────────────────────────
             val todayIdx = n - 1
             val todayXc  = xPx(todayIdx.toFloat())
             val halfL = cW / xRange * 0.46f
@@ -146,13 +169,24 @@ class GraphWidget : AppWidgetProvider() {
                 it.strokeWidth = 2f; it.pathEffect = DashPathEffect(floatArrayOf(8f, 5f), 0f)
                 canvas.drawRoundRect(boxRF, 6f, 6f, it)
             }
-            Paint(Paint.ANTI_ALIAS_FLAG).also {
-                it.color = Color.parseColor("#4CAF50"); it.textSize = 21f
-                it.typeface = Typeface.DEFAULT_BOLD; it.textAlign = Paint.Align.CENTER
-                canvas.drawText("today", (boxRF.left + boxRF.right) / 2f, plotRect.top + 22f, it)
+
+            // ── "today" + даты строго на одном уровне (низ бокса) ────────
+            val labelY   = plotRect.bottom - 8f
+            val labelPaintGreen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#4CAF50"); textSize = 19f
+                typeface = Typeface.DEFAULT_BOLD; textAlign = Paint.Align.CENTER
+            }
+            val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE; textSize = 18f; textAlign = Paint.Align.CENTER
+            }
+            // "today" внизу бокса
+            canvas.drawText("today", (boxRF.left + boxRF.right) / 2f, labelY, labelPaintGreen)
+            // Даты индексы 1–5 на той же высоте
+            for (i in 1..5) {
+                canvas.drawText(dates[i], xPx(i.toFloat()), labelY, datePaint)
             }
 
-            // Линия — все точки
+            // ── Линия — все 7 точек ───────────────────────────────────────
             val linePath = Path()
             for (i in 0 until n) {
                 val px = xPx(i.toFloat()); val py = yPx(weekData[i])
@@ -164,7 +198,7 @@ class GraphWidget : AppWidgetProvider() {
                 canvas.drawPath(linePath, it)
             }
 
-            // Ромбы + подписи
+            // ── Ромбы + подписи значений ──────────────────────────────────
             val diamondFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#FFB300"); style = Paint.Style.FILL
             }
@@ -199,13 +233,13 @@ class GraphWidget : AppWidgetProvider() {
                 Intent(context, GraphWidget::class.java).apply { action = ACTION_UPDATE },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            val fiveMin = 30 * 60 * 1000L
+            val interval = 30 * 60 * 1000L
             try {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,
-                    System.currentTimeMillis() + fiveMin, pi)
+                    System.currentTimeMillis() + interval, pi)
             } catch (e: SecurityException) {
                 am.setInexactRepeating(AlarmManager.RTC_WAKEUP,
-                    System.currentTimeMillis() + fiveMin, fiveMin, pi)
+                    System.currentTimeMillis() + interval, interval, pi)
             }
         }
     }
