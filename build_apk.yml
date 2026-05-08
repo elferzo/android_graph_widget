@@ -1,0 +1,51 @@
+name: Build WhoopWidget APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build APK
+        run: |
+          cp root_build_gradle.txt build.gradle
+          cp app_build_gradle.txt  app/build.gradle
+          export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
+          export ANDROID_HOME=$ANDROID_SDK_ROOT
+          gradle wrapper --gradle-version=8.1.1
+          export PATH=$PATH:$ANDROID_HOME/platform-tools
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Rename APK
+        run: mv app/build/outputs/apk/debug/app-debug.apk graph.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: graphwidget-apk
+          path: graph.apk
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          files: graph.apk
