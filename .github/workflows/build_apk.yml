@@ -1,0 +1,53 @@
+name: Build Weeek APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build project structure and APK
+        run: |
+          chmod +x setup_project.sh
+          bash setup_project.sh
+          export ANDROID_HOME=$ANDROID_SDK_ROOT
+          chmod +x gradlew 2>/dev/null || true
+          wget -q https://services.gradle.org/distributions/gradle-8.1.1-bin.zip -P /tmp
+          unzip -q /tmp/gradle-8.1.1-bin.zip -d /opt/gradle
+          export PATH=$PATH:/opt/gradle/gradle-8.1.1/bin
+          gradle wrapper
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: weeek-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Release APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Weeek v${{ github.run_number }}
+          files: app/build/outputs/apk/debug/app-debug.apk
