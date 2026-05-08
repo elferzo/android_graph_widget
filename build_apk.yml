@@ -1,4 +1,4 @@
-name: Build WhoopWidget APK
+name: Build GraphWidget APK
 
 on:
   push:
@@ -30,15 +30,11 @@ jobs:
         run: |
           cp root_build_gradle.txt build.gradle
           cp app_build_gradle.txt  app/build.gradle
-          export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
-          export ANDROID_HOME=$ANDROID_SDK_ROOT
-          gradle wrapper --gradle-version=8.1.1
-          export PATH=$PATH:$ANDROID_HOME/platform-tools
+          chmod +x setup_project.sh && ./setup_project.sh
+          gradle wrapper --gradle-version=8.9
           chmod +x gradlew
           ./gradlew assembleDebug
-
-      - name: Rename APK
-        run: mv app/build/outputs/apk/debug/app-debug.apk graph.apk
+          mv app/build/outputs/apk/debug/app-debug.apk graph.apk
 
       - uses: actions/upload-artifact@v4
         with:
