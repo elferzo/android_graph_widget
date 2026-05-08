@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.*
+import android.os.Bundle
 import android.widget.RemoteViews
 
 class CalorieChartWidget : AppWidgetProvider() {
@@ -16,8 +17,7 @@ class CalorieChartWidget : AppWidgetProvider() {
         const val ACTION_UPDATE = "com.example.graphwidget.ACTION_UPDATE"
 
         // ═══════════════════════════════════════════════════════════════════
-        //  WHOOP DATA STUB
-        //  Phase 2: заменить реальными данными с Whoop API
+        //  WHOOP DATA STUB — Phase 2: заменить данными с Whoop API
         //  Ровно 7 значений 0–100 (%), индекс 6 = сегодня
         // ═══════════════════════════════════════════════════════════════════
         var weekData = floatArrayOf(62f, 78f, 45f, 88f, 71f, 55f, 83f)
@@ -32,6 +32,11 @@ class CalorieChartWidget : AppWidgetProvider() {
         fun updateWidget(context: Context, awm: AppWidgetManager, widgetId: Int) {
             val rv = RemoteViews(context.packageName, R.layout.widget_calorie_chart)
             rv.setImageViewBitmap(R.id.chart_image, buildChartBitmap())
+            // Убираем системный padding который Samsung добавляет
+            val options = Bundle().apply {
+                putInt(AppWidgetManager.OPTION_APPWIDGET_HOST_CATEGORY, 0)
+            }
+            awm.updateAppWidgetOptions(widgetId, options)
             awm.updateAppWidget(widgetId, rv)
         }
 
@@ -39,36 +44,32 @@ class CalorieChartWidget : AppWidgetProvider() {
             val W = 800; val H = 300
             val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
-
-            // ── Весь bitmap = серая область построения, без отступов ─────
-            // Снаружи ничего нет — Samsung не сможет залить своим фоном
-            canvas.drawColor(Color.parseColor("#22222E"))
+            // Полностью прозрачный фон
+            canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
 
             // ── Геометрия ────────────────────────────────────────────────
-            // Подписи оси Y рисуются внутри, у левого края
-            val labW = 58f   // ширина зоны подписей (внутри серого)
-            val padR = 12f
-            val padT = 22f; val padB = 18f
-
-            val plotL = labW             // левая граница линий/точек
-            val plotR = W - padR
-            val plotT = padT
-            val plotB = H - padB
-            val cW = plotR - plotL
-            val cH = plotB - plotT
+            val padL = 58f; val padR = 12f; val padT = 22f; val padB = 18f
+            val plotRect = RectF(padL, padT, W - padR, H - padB)
 
             val yMin = 0f; val yMax = 100f
-            val n = weekData.size        // 7
+            val n = weekData.size
             val todayRightExtra = 0.55f
             val xRange = (n - 1).toFloat() + todayRightExtra
+            val cW = plotRect.width(); val cH = plotRect.height()
 
-            fun yPx(v: Float) = plotT + cH * (1f - (v - yMin) / (yMax - yMin))
-            fun xPx(i: Float) = plotL + (i / xRange) * cW
+            fun yPx(v: Float) = plotRect.top + cH * (1f - (v - yMin) / (yMax - yMin))
+            fun xPx(i: Float) = plotRect.left + (i / xRange) * cW
 
-            // ── Тонкая чёрная рамка вокруг всего bitmap ──────────────────
+            // ── Серая заливка только области построения ──────────────────
+            Paint(Paint.ANTI_ALIAS_FLAG).also {
+                it.color = Color.parseColor("#22222E"); it.style = Paint.Style.FILL
+                canvas.drawRect(plotRect, it)
+            }
+
+            // ── Тонкая чёрная рамка области ──────────────────────────────
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.BLACK; it.style = Paint.Style.STROKE; it.strokeWidth = 1.2f
-                canvas.drawRect(0f, 0f, W.toFloat(), H.toFloat(), it)
+                canvas.drawRect(plotRect, it)
             }
 
             // ── Горизонтальные пунктиры ───────────────────────────────────
@@ -80,24 +81,22 @@ class CalorieChartWidget : AppWidgetProvider() {
                 color = Color.parseColor("#778899"); textSize = 19f
                 textAlign = Paint.Align.RIGHT
             }
-            val labeledTicks = setOf(0f, 60f, 100f)
             var g = 0f
             while (g <= 100f) {
                 val gy = yPx(g)
-                canvas.drawLine(plotL, gy, plotR, gy, gridPaint)
-                if (g in labeledTicks) {
-                    val label = if (g == 0f) "0" else "${g.toInt()}%"
-                    canvas.drawText(label, labW - 6f, gy + 7f, yLabelPaint)
-                }
+                canvas.drawLine(plotRect.left, gy, plotRect.right, gy, gridPaint)
+                val label = if (g == 0f) "0" else "${g.toInt()}%"
+                if (g == 0f || g == 60f || g == 100f)
+                    canvas.drawText(label, padL - 6f, gy + 7f, yLabelPaint)
                 g += 20f
             }
 
-            // ── TODAY box: светящийся контур, без заливки ─────────────────
+            // ── TODAY box ─────────────────────────────────────────────────
             val todayIdx = n - 1
             val todayXc = xPx(todayIdx.toFloat())
             val halfL = cW / xRange * 0.46f
             val halfR = cW / xRange * 0.52f
-            val boxRF = RectF(todayXc - halfL, plotT, todayXc + halfR, plotB)
+            val boxRF = RectF(todayXc - halfL, plotRect.top, todayXc + halfR, plotRect.bottom)
 
             for ((lw, alpha) in listOf(14f to 20, 9f to 40, 5f to 80, 2.5f to 140)) {
                 Paint(Paint.ANTI_ALIAS_FLAG).also {
@@ -108,15 +107,13 @@ class CalorieChartWidget : AppWidgetProvider() {
             }
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.parseColor("#4CAF50"); it.style = Paint.Style.STROKE
-                it.strokeWidth = 2f
-                it.pathEffect = DashPathEffect(floatArrayOf(8f, 5f), 0f)
+                it.strokeWidth = 2f; it.pathEffect = DashPathEffect(floatArrayOf(8f, 5f), 0f)
                 canvas.drawRoundRect(boxRF, 6f, 6f, it)
             }
-            // "today" внутри бокса сверху
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.parseColor("#4CAF50"); it.textSize = 21f
                 it.typeface = Typeface.DEFAULT_BOLD; it.textAlign = Paint.Align.CENTER
-                canvas.drawText("today", (boxRF.left + boxRF.right) / 2f, plotT + 22f, it)
+                canvas.drawText("today", (boxRF.left + boxRF.right) / 2f, plotRect.top + 22f, it)
             }
 
             // ── Линия — все 7 точек ───────────────────────────────────────
@@ -139,25 +136,24 @@ class CalorieChartWidget : AppWidgetProvider() {
                 val px = xPx(i.toFloat()); val py = yPx(weekData[i])
                 val isToday = (i == todayIdx)
                 drawDiamond(canvas, px, py, if (isToday) 11f else 8f, diamondFill)
-                val lp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.parseColor("#FFB300")
-                    textSize = if (isToday) 21f else 18f
-                    typeface = if (isToday) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-                    textAlign = Paint.Align.CENTER
+                Paint(Paint.ANTI_ALIAS_FLAG).also {
+                    it.color = Color.parseColor("#FFB300")
+                    it.textSize = if (isToday) 21f else 18f
+                    it.typeface = if (isToday) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                    it.textAlign = Paint.Align.CENTER
+                    val offY = if (weekData[i] >= 70f) py + 26f else py - 14f
+                    canvas.drawText("${weekData[i].toInt()}%", px, offY, it)
                 }
-                val offY = if (weekData[i] >= 70f) py + 26f else py - 14f
-                canvas.drawText("${weekData[i].toInt()}%", px, offY, lp)
             }
 
             return bmp
         }
 
         private fun drawDiamond(canvas: Canvas, cx: Float, cy: Float, r: Float, p: Paint) {
-            val path = Path().apply {
+            canvas.drawPath(Path().apply {
                 moveTo(cx, cy - r); lineTo(cx + r, cy)
                 lineTo(cx, cy + r); lineTo(cx - r, cy); close()
-            }
-            canvas.drawPath(path, p)
+            }, p)
         }
 
         fun scheduleAlarm(context: Context) {
