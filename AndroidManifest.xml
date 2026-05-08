@@ -22,7 +22,7 @@
         </activity>
 
         <receiver
-            android:name=".CalorieChartWidget"
+            android:name=".GraphWidget"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

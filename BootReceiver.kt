@@ -7,8 +7,8 @@ import android.content.Intent
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-            CalorieChartWidget.scheduleAlarm(context)
-            CalorieChartWidget.updateWidgets(context)
+            GraphWidget.scheduleAlarm(context)
+            GraphWidget.updateWidgets(context)
         }
     }
 }
