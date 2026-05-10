@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">GraphWidget</string>
-    <string name="widget_description">Calorie Chart Widget</string>
+    <string name="widget_description">Sleep / Recovery Chart</string>
+    <string name="widget_activity_description">Steps / Calories Chart</string>
 </resources>

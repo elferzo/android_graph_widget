@@ -9,6 +9,8 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
             GraphWidget.scheduleAlarm(context)
             GraphWidget.updateWidgets(context)
+            ActivityWidget.scheduleAlarm(context)
+            ActivityWidget.updateWidgets(context)
         }
     }
 }

@@ -19,15 +19,11 @@ import java.util.*
 class GraphWidget : AppWidgetProvider() {
 
     companion object {
-        const val ACTION_UPDATE  = "com.example.graphwidget.ACTION_UPDATE"
-        const val SERVER_URL     = "http://178.208.86.99:5001/recovery"
-        const val PREFS_NAME     = "graphwidget_prefs"
-        const val KEY_DATA       = "last_data"
-        const val COLOR_REC      = "#FFB300"
-        const val COLOR_SLP      = "#29B6F6"
-
-        val DEFAULT_REC = floatArrayOf(42f, 38f, 48f, 55f, 80f, 77f, 84f)
-        val DEFAULT_SLP = floatArrayOf(65f, 72f, 55f, 80f, 60f, 88f, 70f)
+        const val ACTION_UPDATE = "com.example.graphwidget.ACTION_UPDATE"
+        const val SERVER_URL    = "http://178.208.86.99:5001/recovery"
+        const val PREFS_NAME    = "graphwidget_prefs"
+        const val KEY_SCORES    = "last_scores"
+        val DEFAULT_DATA = floatArrayOf(42f, 38f, 48f, 55f, 80f, 77f, 84f)
 
         fun updateWidgets(context: Context) {
             val awm = context.getSystemService(Context.APPWIDGET_SERVICE) as AppWidgetManager
@@ -37,58 +33,46 @@ class GraphWidget : AppWidgetProvider() {
 
         fun updateWidget(context: Context, awm: AppWidgetManager, widgetId: Int) {
             Thread {
-                val (rec, slp) = fetchScores(context)
+                val scores = fetchScores(context)
                 val rv = RemoteViews(context.packageName, R.layout.widget_calorie_chart)
-                rv.setImageViewBitmap(R.id.chart_image, buildChartBitmap(rec, slp))
+                rv.setImageViewBitmap(R.id.chart_image, buildChartBitmap(scores))
                 awm.updateAppWidgetOptions(widgetId, Bundle())
                 awm.updateAppWidget(widgetId, rv)
             }.start()
         }
 
-        fun fetchScores(context: Context): Pair<FloatArray, FloatArray> {
+        fun fetchScores(context: Context): FloatArray {
             return try {
                 val conn = URL(SERVER_URL).openConnection() as HttpURLConnection
                 conn.connectTimeout = 5000; conn.readTimeout = 5000
                 conn.requestMethod = "GET"
                 if (conn.responseCode == 200) {
                     val body = conn.inputStream.bufferedReader().readText()
-                    val json = JSONObject(body)
-                    val rec  = json.getJSONArray("scores")
-                    val slp  = json.optJSONArray("sleep")
-                    val recArr = FloatArray(rec.length()) { rec.getDouble(it).toFloat() }
-                    val slpArr = if (slp != null) FloatArray(slp.length()) { slp.getDouble(it).toFloat() }
-                                 else DEFAULT_SLP
+                    val arr  = JSONObject(body).getJSONArray("scores")
+                    val result = FloatArray(arr.length()) { arr.getDouble(it).toFloat() }
                     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                        .edit().putString(KEY_DATA, body).apply()
-                    Pair(recArr, slpArr)
-                } else loadCached(context)
-            } catch (e: Exception) { loadCached(context) }
+                        .edit().putString(KEY_SCORES, body).apply()
+                    result
+                } else loadCachedScores(context)
+            } catch (e: Exception) { loadCachedScores(context) }
         }
 
-        fun loadCached(context: Context): Pair<FloatArray, FloatArray> {
+        fun loadCachedScores(context: Context): FloatArray {
             val s = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(KEY_DATA, null) ?: return Pair(DEFAULT_REC, DEFAULT_SLP)
+                .getString(KEY_SCORES, null) ?: return DEFAULT_DATA
             return try {
-                val json = JSONObject(s)
-                val rec  = json.getJSONArray("scores")
-                val slp  = json.optJSONArray("sleep")
-                val recArr = FloatArray(rec.length()) { rec.getDouble(it).toFloat() }
-                val slpArr = if (slp != null) FloatArray(slp.length()) { slp.getDouble(it).toFloat() }
-                             else DEFAULT_SLP
-                Pair(recArr, slpArr)
-            } catch (e: Exception) { Pair(DEFAULT_REC, DEFAULT_SLP) }
+                val arr = JSONObject(s).getJSONArray("scores")
+                FloatArray(arr.length()) { arr.getDouble(it).toFloat() }
+            } catch (e: Exception) { DEFAULT_DATA }
         }
 
-        fun buildChartBitmap(
-            recData: FloatArray = DEFAULT_REC,
-            slpData: FloatArray = DEFAULT_SLP
-        ): Bitmap {
-            val W = 800; val H = 360
+        fun buildChartBitmap(weekData: FloatArray = DEFAULT_DATA): Bitmap {
+            val W = 800; val H = 340
             val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
             canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
 
-            // ── Даты ─────────────────────────────────────────────────────
+            // ── Даты 7 дней ───────────────────────────────────────────────
             val sdf = SimpleDateFormat("dd.MM", Locale.getDefault())
             val dates = Array(7) { i ->
                 sdf.format(Calendar.getInstance().apply {
@@ -97,53 +81,49 @@ class GraphWidget : AppWidgetProvider() {
             }
 
             // ── Геометрия ─────────────────────────────────────────────────
-            val titleH = 52f   // 2 строки заголовка
+            val titleH = 36f
             val padL   = 58f; val padR = 12f
-            val padT   = titleH + 4f; val padB = 10f
+            val padT   = titleH + 4f
+            val padB   = 10f
+
             val plotRect = RectF(padL, padT, W - padR, H - padB)
             val cW = plotRect.width(); val cH = plotRect.height()
 
             val yMin = 0f; val yMax = 100f
-            val n = recData.size
+            val n = weekData.size
             val todayRightExtra = 0.55f
             val xRange = (n - 1).toFloat() + todayRightExtra
 
             fun yPx(v: Float) = plotRect.top + cH * (1f - (v - yMin) / (yMax - yMin))
             fun xPx(i: Float) = plotRect.left + (i / xRange) * cW
 
-            // ── Заголовок строка 1: ___recovery___... ────────────────────
+            // ── Заголовок "recovery___________" (линия только справа) ────
             val uPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#888899"); textSize = 23f
+                color = Color.parseColor("#888899"); textSize = 24f
                 typeface = Typeface.MONOSPACE
             }
-            val recPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor(COLOR_REC); textSize = 23f
+            val wPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE; textSize = 24f
                 typeface = Typeface.MONOSPACE
             }
-            val slpPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor(COLOR_SLP); textSize = 23f
-                typeface = Typeface.MONOSPACE
-            }
-            val charW    = uPaint.measureText("_")
-            val leftU    = "___"
-            val leftUW   = uPaint.measureText(leftU)
-            val recWordW = recPaint.measureText("recovery")
-            val rightCnt = ((W - padR - padL - leftUW - recWordW) / charW).toInt()
-            val line1Y   = padT - 26f
-            val line2Y   = padT - 4f
+            val titleY  = padT - 8f
+            val wordW   = wPaint.measureText("recovery")
+            val charW   = uPaint.measureText("_")
+            val leftU = "___"
+            val leftUW = uPaint.measureText(leftU)
+            val rightCount = ((W - padR - padL - leftUW - wordW) / charW).toInt()
 
-            canvas.drawText(leftU, padL, line1Y, uPaint)
-            canvas.drawText("recovery", padL + leftUW, line1Y, recPaint)
-            canvas.drawText("_".repeat(rightCnt), padL + leftUW + recWordW, line1Y, uPaint)
-
-            // ── Заголовок строка 2:        sleep ─────────────────────────
-            canvas.drawText("sleep", padL + leftUW, line2Y, slpPaint)
+            canvas.drawText("___", padL, titleY, uPaint)
+            canvas.drawText("recovery", padL + uPaint.measureText("___"), titleY, wPaint)
+            canvas.drawText("_".repeat(rightCount), padL + leftUW + wordW, titleY, uPaint)
 
             // ── Полупрозрачная заливка 50% ────────────────────────────────
             Paint(Paint.ANTI_ALIAS_FLAG).also {
-                it.color = Color.argb(128, 0x22, 0x22, 0x2E); it.style = Paint.Style.FILL
+                it.color = Color.argb(128, 0x22, 0x22, 0x2E)  // alpha=128 = 50%
+                it.style = Paint.Style.FILL
                 canvas.drawRect(plotRect, it)
             }
+
             // ── Тонкая чёрная рамка ───────────────────────────────────────
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.BLACK; it.style = Paint.Style.STROKE; it.strokeWidth = 1.2f
@@ -156,14 +136,17 @@ class GraphWidget : AppWidgetProvider() {
                 pathEffect = DashPathEffect(floatArrayOf(9f, 8f), 0f)
             }
             val yLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#778899"); textSize = 19f; textAlign = Paint.Align.RIGHT
+                color = Color.parseColor("#778899"); textSize = 19f
+                textAlign = Paint.Align.RIGHT
             }
             var g = 0f
             while (g <= 100f) {
                 val gy = yPx(g)
                 canvas.drawLine(plotRect.left, gy, plotRect.right, gy, gridPaint)
-                if (g == 0f || g == 60f || g == 100f)
-                    canvas.drawText(if (g == 0f) "0" else "${g.toInt()}%", padL - 6f, gy + 7f, yLabelPaint)
+                if (g == 0f || g == 60f || g == 100f) {
+                    val label = if (g == 0f) "0" else "${g.toInt()}%"
+                    canvas.drawText(label, padL - 6f, gy + 7f, yLabelPaint)
+                }
                 g += 20f
             }
 
@@ -187,55 +170,50 @@ class GraphWidget : AppWidgetProvider() {
                 canvas.drawRoundRect(boxRF, 6f, 6f, it)
             }
 
-            // ── "today" + даты на одном уровне ───────────────────────────
-            val labelY = plotRect.bottom - 8f
-            Paint(Paint.ANTI_ALIAS_FLAG).also {
-                it.color = Color.parseColor("#4CAF50"); it.textSize = 19f
-                it.typeface = Typeface.DEFAULT_BOLD; it.textAlign = Paint.Align.CENTER
-                canvas.drawText("today", (boxRF.left + boxRF.right) / 2f, labelY, it)
+            // ── "today" + даты строго на одном уровне (низ бокса) ────────
+            val labelY   = plotRect.bottom - 8f
+            val labelPaintGreen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#4CAF50"); textSize = 19f
+                typeface = Typeface.DEFAULT_BOLD; textAlign = Paint.Align.CENTER
             }
             val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.WHITE; textSize = 18f; textAlign = Paint.Align.CENTER
             }
-            for (i in 1..5) canvas.drawText(dates[i], xPx(i.toFloat()), labelY, datePaint)
-
-            // ── Sleep линия + ромбы + подписи ─────────────────────────────
-            val slpLinePath = Path()
-            for (i in 0 until n) {
-                val px = xPx(i.toFloat()); val py = yPx(slpData[i])
-                if (i == 0) slpLinePath.moveTo(px, py) else slpLinePath.lineTo(px, py)
-            }
-            Paint(Paint.ANTI_ALIAS_FLAG).also {
-                it.color = Color.parseColor(COLOR_SLP); it.strokeWidth = 1.8f
-                it.style = Paint.Style.STROKE; it.alpha = 220
-                canvas.drawPath(slpLinePath, it)
-            }
-            val slpLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor(COLOR_SLP); textSize = 17f; textAlign = Paint.Align.CENTER
-            }
-            for (i in 0 until n) {
-                val px = xPx(i.toFloat()); val py = yPx(slpData[i])
-                canvas.drawText("${slpData[i].toInt()}%", px, py - 8f, slpLabel)
+            // "today" внизу бокса
+            canvas.drawText("today", (boxRF.left + boxRF.right) / 2f, labelY, labelPaintGreen)
+            // Даты индексы 1–5 на той же высоте
+            for (i in 1..5) {
+                canvas.drawText(dates[i], xPx(i.toFloat()), labelY, datePaint)
             }
 
-            // ── Recovery линия (без маркеров) + подписи ПОД линией ───────
-            val recLinePath = Path()
+            // ── Линия — все 7 точек ───────────────────────────────────────
+            val linePath = Path()
             for (i in 0 until n) {
-                val px = xPx(i.toFloat()); val py = yPx(recData[i])
-                if (i == 0) recLinePath.moveTo(px, py) else recLinePath.lineTo(px, py)
+                val px = xPx(i.toFloat()); val py = yPx(weekData[i])
+                if (i == 0) linePath.moveTo(px, py) else linePath.lineTo(px, py)
             }
             Paint(Paint.ANTI_ALIAS_FLAG).also {
-                it.color = Color.parseColor(COLOR_REC); it.strokeWidth = 2.2f
-                it.style = Paint.Style.STROKE; it.alpha = 220
-                canvas.drawPath(recLinePath, it)
+                it.color = Color.parseColor("#DDFFB300"); it.strokeWidth = 2.2f
+                it.style = Paint.Style.STROKE
+                canvas.drawPath(linePath, it)
             }
-            val recLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor(COLOR_REC); textSize = 17f; textAlign = Paint.Align.CENTER
+
+            // ── Ромбы + подписи значений ──────────────────────────────────
+            val diamondFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#FFB300"); style = Paint.Style.FILL
             }
             for (i in 0 until n) {
-                val px = xPx(i.toFloat()); val py = yPx(recData[i])
-                // подпись всегда ПОД линией
-                canvas.drawText("${recData[i].toInt()}%", px, py + 24f, recLabel)
+                val px = xPx(i.toFloat()); val py = yPx(weekData[i])
+                val isToday = (i == todayIdx)
+                drawDiamond(canvas, px, py, if (isToday) 11f else 8f, diamondFill)
+                Paint(Paint.ANTI_ALIAS_FLAG).also {
+                    it.color = Color.parseColor("#FFB300")
+                    it.textSize = if (isToday) 21f else 18f
+                    it.typeface = if (isToday) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                    it.textAlign = Paint.Align.CENTER
+                    val offY = if (weekData[i] >= 70f) py + 26f else py - 14f
+                    canvas.drawText("${weekData[i].toInt()}%", px, offY, it)
+                }
             }
 
             return bmp

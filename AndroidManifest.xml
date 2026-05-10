@@ -2,15 +2,23 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.graphwidget">
 
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Health Connect — шаги -->
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
 
     <application
         android:allowBackup="true"
         android:label="@string/app_name"
-        android:usesCleartextTraffic="true">
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.NoActionBar">
 
         <activity
             android:name=".MainActivity"
@@ -21,9 +29,11 @@
             </intent-filter>
         </activity>
 
+        <!-- ── Виджет 1: Sleep / Recovery ─────────────────────────────── -->
         <receiver
             android:name=".GraphWidget"
-            android:exported="true">
+            android:exported="true"
+            android:label="Sleep / Recovery">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
                 <action android:name="com.example.graphwidget.ACTION_UPDATE" />
@@ -33,12 +43,26 @@
                 android:resource="@xml/widget_info" />
         </receiver>
 
+        <!-- ── Виджет 2: Steps / Calories ─────────────────────────────── -->
+        <receiver
+            android:name=".ActivityWidget"
+            android:exported="true"
+            android:label="Steps / Calories">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.graphwidget.ACTION_UPDATE_ACTIVITY" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_activity_info" />
+        </receiver>
+
+        <!-- Boot receiver -->
         <receiver
             android:name=".BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
 
