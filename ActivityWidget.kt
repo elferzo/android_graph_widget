@@ -5,22 +5,18 @@ import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.graphics.*
+import android.net.Uri
 import android.os.Bundle
 import android.widget.RemoteViews
-import androidx.health.connect.client.HealthConnectClient
-import androidx.health.connect.client.records.StepsRecord
-import androidx.health.connect.client.request.ReadRecordsRequest
-import androidx.health.connect.client.time.TimeRangeFilter
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
-import java.time.LocalDate
-import java.time.ZoneId
 import java.util.*
 
 class ActivityWidget : AppWidgetProvider() {
@@ -36,7 +32,7 @@ class ActivityWidget : AppWidgetProvider() {
         val DEFAULT_CALORIES = floatArrayOf(2200f, 2400f, 2100f, 2300f, 2500f, 2200f, 2000f)
         val DEFAULT_STEPS    = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f)
 
-        fun calPct(kcal: Float)  = (kcal / CALORIES_GOAL * 100f).coerceIn(0f, 100f)
+        fun calPct(kcal: Float)    = (kcal / CALORIES_GOAL * 100f).coerceIn(0f, 100f)
         fun stepsPct(steps: Float) = (steps / STEPS_GOAL * 100f).coerceIn(0f, 100f)
 
         fun updateWidgets(context: Context) {
@@ -87,23 +83,61 @@ class ActivityWidget : AppWidgetProvider() {
             } catch (e: Exception) { DEFAULT_CALORIES }
         }
 
-        // ── Шаги из Health Connect ────────────────────────────────────────
-        suspend fun fetchSteps(context: Context): FloatArray {
+        // ── Шаги из Health Connect через ContentResolver ──────────────────
+        // Health Connect URI для шагов (работает на Android 9+ с установленным HC)
+        fun fetchSteps(context: Context): FloatArray {
+            val result = FloatArray(7) { 0f }
             return try {
-                val client = HealthConnectClient.getOrCreate(context)
-                val today  = LocalDate.now(ZoneId.systemDefault())
-                val result = FloatArray(7)
-                for (i in 0..6) {
-                    val date  = today.minusDays((6 - i).toLong())
-                    val start = date.atStartOfDay(ZoneId.systemDefault()).toInstant()
-                    val end   = date.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant()
-                    val req   = ReadRecordsRequest(StepsRecord::class,
-                        TimeRangeFilter.between(start, end))
-                    val resp  = client.readRecords(req)
-                    result[i] = resp.records.sumOf { it.count }.toFloat()
+                val cal = Calendar.getInstance()
+                // Сброс до конца сегодняшнего дня
+                cal.set(Calendar.HOUR_OF_DAY, 23)
+                cal.set(Calendar.MINUTE, 59)
+                cal.set(Calendar.SECOND, 59)
+
+                val authority = "com.google.android.apps.healthdata"
+                val stepsUri = Uri.parse("content://$authority/data_type/steps_aggregate")
+
+                for (i in 6 downTo 0) {
+                    val endTime   = cal.timeInMillis
+                    val startTime = endTime - (i * 86_400_000L)
+                    val dayEnd    = endTime - ((i - 1).coerceAtLeast(0) * 86_400_000L)
+
+                    val dayStart = run {
+                        val c = Calendar.getInstance()
+                        c.timeInMillis = endTime - (i * 86_400_000L)
+                        c.set(Calendar.HOUR_OF_DAY, 0)
+                        c.set(Calendar.MINUTE, 0)
+                        c.set(Calendar.SECOND, 0)
+                        c.timeInMillis
+                    }
+                    val dayEnd2 = run {
+                        val c = Calendar.getInstance()
+                        c.timeInMillis = endTime - (i * 86_400_000L)
+                        c.set(Calendar.HOUR_OF_DAY, 23)
+                        c.set(Calendar.MINUTE, 59)
+                        c.set(Calendar.SECOND, 59)
+                        c.timeInMillis
+                    }
+
+                    val cursor = context.contentResolver.query(
+                        stepsUri,
+                        arrayOf("steps"),
+                        "start_time >= ? AND end_time <= ?",
+                        arrayOf(dayStart.toString(), dayEnd2.toString()),
+                        null
+                    )
+                    cursor?.use {
+                        var total = 0L
+                        while (it.moveToNext()) {
+                            total += it.getLong(0)
+                        }
+                        result[6 - i] = total.toFloat()
+                    }
                 }
                 result
-            } catch (e: Exception) { DEFAULT_STEPS }
+            } catch (e: Exception) {
+                DEFAULT_STEPS
+            }
         }
 
         fun buildChartBitmap(
