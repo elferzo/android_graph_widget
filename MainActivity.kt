@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
@@ -22,7 +23,8 @@ class MainActivity : AppCompatActivity() {
 
     private val requestPermissions = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract()
-    ) {
+    ) { granted ->
+        Toast.makeText(this, "Granted: $granted", Toast.LENGTH_LONG).show()
         finish()
     }
 
@@ -39,22 +41,35 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // ── Health Connect разрешения ─────────────────────────────────────
+        // ── Проверка статуса Health Connect ───────────────────────────────
+        val status = HealthConnectClient.getSdkStatus(this)
+        Toast.makeText(this, "HC status: $status", Toast.LENGTH_LONG).show()
+
+        if (status == HealthConnectClient.SDK_UNAVAILABLE) {
+            Toast.makeText(this, "Health Connect недоступен", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+
+        // ── Запрос разрешений ─────────────────────────────────────────────
         try {
             val client = HealthConnectClient.getOrCreate(this)
             CoroutineScope(Dispatchers.Main).launch {
                 try {
                     val granted = client.permissionController.getGrantedPermissions()
+                    Toast.makeText(this@MainActivity, "Already granted: $granted", Toast.LENGTH_LONG).show()
                     if (!granted.containsAll(permissions)) {
                         requestPermissions.launch(permissions)
                     } else {
                         finish()
                     }
                 } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                     finish()
                 }
             }
         } catch (e: Exception) {
+            Toast.makeText(this, "Init error: ${e.message}", Toast.LENGTH_LONG).show()
             finish()
         }
     }
