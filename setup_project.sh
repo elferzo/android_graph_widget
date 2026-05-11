@@ -17,6 +17,7 @@ cp widget_layout.xml          $SRC/res/layout/widget_calorie_chart.xml
 cp widget_activity_chart.xml  $SRC/res/layout/widget_activity_chart.xml
 cp widget_info.xml            $SRC/res/xml/widget_info.xml
 cp widget_activity_info.xml   $SRC/res/xml/widget_activity_info.xml
+cp network_security_config.xml $SRC/res/xml/network_security_config.xml
 cp strings.xml                $SRC/res/values/strings.xml
 cp AndroidManifest.xml        $SRC/AndroidManifest.xml
 cp root_build_gradle.txt      build.gradle
