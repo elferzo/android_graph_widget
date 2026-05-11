@@ -6,8 +6,25 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.appcompat.app.AppCompatActivity
+import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.PermissionController
+import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.StepsRecord
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
+
+    private val permissions = setOf(
+        HealthPermission.getReadPermission(StepsRecord::class)
+    )
+
+    private val requestPermissions = registerForActivityResult(
+        PermissionController.createRequestPermissionResultContract()
+    ) {
+        finish()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -22,14 +39,21 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // ── Открыть Health Connect для выдачи разрешений вручную ──────────
-        try {
-            val intent = Intent("androidx.health.ACTION_HEALTH_CONNECT_SETTINGS")
-            startActivity(intent)
+        // ── Health Connect разрешения ─────────────────────────────────────
+        val client = try {
+            HealthConnectClient.getOrCreate(this)
         } catch (e: Exception) {
-            // Health Connect не установлен — просто закрываем
+            finish()
+            return
         }
 
-        finish()
+        CoroutineScope(Dispatchers.Main).launch {
+            val granted = client.permissionController.getGrantedPermissions()
+            if (!granted.containsAll(permissions)) {
+                requestPermissions.launch(permissions)
+            } else {
+                finish()
+            }
+        }
     }
 }
