@@ -40,12 +40,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ── Health Connect разрешения ─────────────────────────────────────
-        val client = try {
-            HealthConnectClient.getOrCreate(this)
-        } catch (e: Exception) {
+        val status = HealthConnectClient.getSdkStatus(this)
+        if (status == HealthConnectClient.SDK_UNAVAILABLE ||
+            status == HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED) {
             finish()
             return
         }
+
+        val client = HealthConnectClient.getOrCreate(this)
 
         CoroutineScope(Dispatchers.Main).launch {
             val granted = client.permissionController.getGrantedPermissions()
