@@ -6,23 +6,8 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.appcompat.app.AppCompatActivity
-import androidx.health.connect.client.HealthConnectClient
-import androidx.health.connect.client.permission.HealthPermission
-import androidx.health.connect.client.records.StepsRecord
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
-
-    private val healthPermissions = setOf(
-        HealthPermission.getReadPermission(StepsRecord::class)
-    )
-
-    private val requestHealthPermissions = registerForActivityResult(
-        HealthConnectClient.createRequestPermissionResultContract()
-    ) {
-        finish()
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,25 +17,19 @@ class MainActivity : AppCompatActivity() {
             val am = getSystemService(ALARM_SERVICE) as AlarmManager
             if (!am.canScheduleExactAlarms()) {
                 startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM))
+                finish()
                 return
             }
         }
 
-        // ── Health Connect разрешения ─────────────────────────────────────
-        val client = try {
-            HealthConnectClient.getOrCreate(this)
+        // ── Открыть Health Connect для выдачи разрешений вручную ──────────
+        try {
+            val intent = Intent("androidx.health.ACTION_HEALTH_CONNECT_SETTINGS")
+            startActivity(intent)
         } catch (e: Exception) {
-            finish()
-            return
+            // Health Connect не установлен — просто закрываем
         }
 
-        lifecycleScope.launch {
-            val granted = client.permissionController.getGrantedPermissions()
-            if (!granted.containsAll(healthPermissions)) {
-                requestHealthPermissions.launch(healthPermissions)
-            } else {
-                finish()
-            }
-        }
+        finish()
     }
 }
