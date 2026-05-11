@@ -40,22 +40,22 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ── Health Connect разрешения ─────────────────────────────────────
-        val status = HealthConnectClient.getSdkStatus(this)
-        if (status == HealthConnectClient.SDK_UNAVAILABLE ||
-            status == HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED) {
-            finish()
-            return
-        }
-
-        val client = HealthConnectClient.getOrCreate(this)
-
-        CoroutineScope(Dispatchers.Main).launch {
-            val granted = client.permissionController.getGrantedPermissions()
-            if (!granted.containsAll(permissions)) {
-                requestPermissions.launch(permissions)
-            } else {
-                finish()
+        try {
+            val client = HealthConnectClient.getOrCreate(this)
+            CoroutineScope(Dispatchers.Main).launch {
+                try {
+                    val granted = client.permissionController.getGrantedPermissions()
+                    if (!granted.containsAll(permissions)) {
+                        requestPermissions.launch(permissions)
+                    } else {
+                        finish()
+                    }
+                } catch (e: Exception) {
+                    finish()
+                }
             }
+        } catch (e: Exception) {
+            finish()
         }
     }
 }
