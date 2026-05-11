@@ -21,12 +21,21 @@
         android:theme="@style/Theme.AppCompat.NoActionBar"
         android:networkSecurityConfig="@xml/network_security_config">
 
+        <!-- Privacy Policy для Health Connect -->
+        <meta-data
+            android:name="androidx.health.connect.client.PRIVACY_POLICY_URL"
+            android:value="https://178.208.86.99" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Health Connect permissions rationale -->
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
             </intent-filter>
         </activity>
 
