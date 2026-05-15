@@ -7,9 +7,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.database.Cursor
 import android.graphics.*
-import android.net.Uri
 import android.os.Bundle
 import android.widget.RemoteViews
 import kotlinx.coroutines.*
@@ -22,14 +20,16 @@ import java.util.*
 class ActivityWidget : AppWidgetProvider() {
 
     companion object {
-        const val ACTION_UPDATE  = "com.example.graphwidget.ACTION_UPDATE_ACTIVITY"
-        const val SERVER_URL     = "http://178.208.86.99:5001/activity"
-        const val PREFS_NAME     = "activitywidget_prefs"
-        const val KEY_DATA       = "last_data"
-        const val COLOR_CAL      = "#FF6D00"
-        const val COLOR_STP      = "#29B6F6"
-        const val STEPS_GOAL     = 10_000f
-        const val CALORIES_GOAL  = 2500f
+        const val ACTION_UPDATE      = "com.example.graphwidget.ACTION_UPDATE_ACTIVITY"
+        const val SERVER_URL_ACTIVITY = "http://178.208.86.99:5001/activity"
+        const val SERVER_URL_STEPS    = "http://178.208.86.99:5001/steps"
+        const val PREFS_NAME         = "activitywidget_prefs"
+        const val KEY_CALORIES       = "last_calories"
+        const val KEY_STEPS          = "last_steps"
+        const val COLOR_CAL          = "#FF6D00"
+        const val COLOR_STP          = "#29B6F6"
+        const val STEPS_GOAL         = 10_000f
+        const val CALORIES_GOAL      = 2500f
 
         val DEFAULT_CAL = floatArrayOf(2200f, 2400f, 2100f, 2300f, 2500f, 2200f, 2000f)
         val DEFAULT_STP = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f)
@@ -44,98 +44,45 @@ class ActivityWidget : AppWidgetProvider() {
         }
 
         fun updateWidget(context: Context, awm: AppWidgetManager, widgetId: Int) {
-            CoroutineScope(Dispatchers.IO).launch {
-                val cal = fetchCalories(context)
-                val stp = fetchStepsContentResolver(context)
+            Thread {
+                val cal = fetchArray(context, SERVER_URL_ACTIVITY, "calories", KEY_CALORIES, DEFAULT_CAL)
+                val stp = fetchArray(context, SERVER_URL_STEPS, "steps", KEY_STEPS, DEFAULT_STP)
                 val rv = RemoteViews(context.packageName, R.layout.widget_activity_chart)
                 rv.setImageViewBitmap(R.id.activity_chart_image, buildChartBitmap(cal, stp))
+                awm.updateAppWidgetOptions(widgetId, Bundle())
                 awm.updateAppWidget(widgetId, rv)
-            }
+            }.start()
         }
 
-        // ── Калории с сервера ─────────────────────────────────────────────
-        fun fetchCalories(context: Context): FloatArray {
+        fun fetchArray(
+            context: Context,
+            url: String,
+            key: String,
+            cacheKey: String,
+            default: FloatArray
+        ): FloatArray {
             return try {
-                val conn = URL(SERVER_URL).openConnection() as HttpURLConnection
+                val conn = URL(url).openConnection() as HttpURLConnection
                 conn.connectTimeout = 5000; conn.readTimeout = 5000
                 conn.requestMethod = "GET"
                 if (conn.responseCode == 200) {
                     val body = conn.inputStream.bufferedReader().readText()
-                    val json = JSONObject(body)
-                    val arr  = json.getJSONArray("calories")
+                    val arr  = JSONObject(body).getJSONArray(key)
                     val result = FloatArray(arr.length()) { arr.getDouble(it).toFloat() }
                     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                        .edit().putString(KEY_DATA, body).apply()
+                        .edit().putString(cacheKey, body).apply()
                     result
-                } else loadCachedCalories(context)
-            } catch (e: Exception) { loadCachedCalories(context) }
+                } else loadCached(context, cacheKey, key, default)
+            } catch (e: Exception) { loadCached(context, cacheKey, key, default) }
         }
 
-        fun loadCachedCalories(context: Context): FloatArray {
+        fun loadCached(context: Context, cacheKey: String, key: String, default: FloatArray): FloatArray {
             val s = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(KEY_DATA, null) ?: return DEFAULT_CAL
+                .getString(cacheKey, null) ?: return default
             return try {
-                val arr = JSONObject(s).getJSONArray("calories")
+                val arr = JSONObject(s).getJSONArray(key)
                 FloatArray(arr.length()) { arr.getDouble(it).toFloat() }
-            } catch (e: Exception) { DEFAULT_CAL }
-        }
-
-        // ── Шаги через ContentResolver из Health Connect ──────────────────
-        fun fetchStepsContentResolver(context: Context): FloatArray {
-            val result = FloatArray(7) { 0f }
-            return try {
-                val cal = Calendar.getInstance()
-                for (i in 6 downTo 0) {
-                    val dayEnd = Calendar.getInstance().apply {
-                        add(Calendar.DAY_OF_YEAR, -(6 - i) * -1 + 6 - i - (6 - i))
-                        set(Calendar.HOUR_OF_DAY, 23)
-                        set(Calendar.MINUTE, 59)
-                        set(Calendar.SECOND, 59)
-                        set(Calendar.MILLISECOND, 999)
-                        add(Calendar.DAY_OF_YEAR, -(6 - i))
-                    }
-                    val dayStart = Calendar.getInstance().apply {
-                        timeInMillis = dayEnd.timeInMillis
-                        set(Calendar.HOUR_OF_DAY, 0)
-                        set(Calendar.MINUTE, 0)
-                        set(Calendar.SECOND, 0)
-                        set(Calendar.MILLISECOND, 0)
-                    }
-
-                    // Health Connect ContentResolver URI
-                    val uri = Uri.parse("content://androidx.health.platform.client.provider/health_data")
-                    var cursor: Cursor? = null
-                    try {
-                        cursor = context.contentResolver.query(
-                            uri,
-                            null,
-                            "data_type = ? AND start_time >= ? AND end_time <= ?",
-                            arrayOf("Steps", dayStart.timeInMillis.toString(), dayEnd.timeInMillis.toString()),
-                            null
-                        )
-                        var total = 0L
-                        cursor?.use {
-                            while (it.moveToNext()) {
-                                val idx = it.getColumnIndex("count")
-                                if (idx >= 0) total += it.getLong(idx)
-                            }
-                        }
-                        result[6 - i] = total.toFloat()
-                    } catch (e: Exception) {
-                        // попробуем альтернативный URI
-                        try {
-                            val uri2 = Uri.parse("content://com.google.android.apps.healthdata/data_type/steps_daily_summary")
-                            val c2 = context.contentResolver.query(uri2, null,
-                                "start_time >= ? AND end_time <= ?",
-                                arrayOf(dayStart.timeInMillis.toString(), dayEnd.timeInMillis.toString()), null)
-                            var total2 = 0L
-                            c2?.use { while (it.moveToNext()) { total2 += it.getLong(0) } }
-                            result[6 - i] = total2.toFloat()
-                        } catch (e2: Exception) { /* оставляем 0 */ }
-                    }
-                }
-                result
-            } catch (e: Exception) { DEFAULT_STP }
+            } catch (e: Exception) { default }
         }
 
         fun buildChartBitmap(
@@ -247,7 +194,7 @@ class ActivityWidget : AppWidgetProvider() {
             }
             for (i in 1..5) canvas.drawText(dates[i], xPx(i.toFloat()), labelY, datePaint)
 
-            // ── Steps линия ───────────────────────────────────────────────
+            // ── Steps линия + подписи НАД линией ─────────────────────────
             val stpPath = Path()
             for (i in 0 until n) {
                 val px = xPx(i.toFloat()); val py = yPx(stpPcts[i])
@@ -267,7 +214,7 @@ class ActivityWidget : AppWidgetProvider() {
                 canvas.drawText(lbl, px, py - 8f, stpLabel)
             }
 
-            // ── Calories линия ────────────────────────────────────────────
+            // ── Calories линия + подписи ПОД линией ──────────────────────
             val calPath = Path()
             for (i in 0 until n) {
                 val px = xPx(i.toFloat()); val py = yPx(calPcts[i])
