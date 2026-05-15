@@ -10,7 +10,6 @@ import android.content.Intent
 import android.graphics.*
 import android.os.Bundle
 import android.widget.RemoteViews
-import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -20,22 +19,17 @@ import java.util.*
 class ActivityWidget : AppWidgetProvider() {
 
     companion object {
-        const val ACTION_UPDATE      = "com.example.graphwidget.ACTION_UPDATE_ACTIVITY"
+        const val ACTION_UPDATE       = "com.example.graphwidget.ACTION_UPDATE_ACTIVITY"
         const val SERVER_URL_ACTIVITY = "http://178.208.86.99:5001/activity"
         const val SERVER_URL_STEPS    = "http://178.208.86.99:5001/steps"
-        const val PREFS_NAME         = "activitywidget_prefs"
-        const val KEY_CALORIES       = "last_calories"
-        const val KEY_STEPS          = "last_steps"
-        const val COLOR_CAL          = "#FF6D00"
-        const val COLOR_STP          = "#29B6F6"
-        const val STEPS_GOAL         = 10_000f
-        const val CALORIES_GOAL      = 2500f
+        const val PREFS_NAME          = "activitywidget_prefs"
+        const val KEY_CALORIES        = "last_calories"
+        const val KEY_STEPS           = "last_steps"
+        const val COLOR_CAL           = "#FF6D00"
+        const val COLOR_STP           = "#29B6F6"
 
         val DEFAULT_CAL = floatArrayOf(2200f, 2400f, 2100f, 2300f, 2500f, 2200f, 2000f)
         val DEFAULT_STP = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f)
-
-        fun calPct(kcal: Float)    = (kcal / CALORIES_GOAL * 100f).coerceIn(0f, 100f)
-        fun stepsPct(steps: Float) = (steps / STEPS_GOAL * 100f).coerceIn(0f, 100f)
 
         fun updateWidgets(context: Context) {
             val awm = context.getSystemService(Context.APPWIDGET_SERVICE) as AppWidgetManager
@@ -55,11 +49,8 @@ class ActivityWidget : AppWidgetProvider() {
         }
 
         fun fetchArray(
-            context: Context,
-            url: String,
-            key: String,
-            cacheKey: String,
-            default: FloatArray
+            context: Context, url: String, key: String,
+            cacheKey: String, default: FloatArray
         ): FloatArray {
             return try {
                 val conn = URL(url).openConnection() as HttpURLConnection
@@ -102,20 +93,24 @@ class ActivityWidget : AppWidgetProvider() {
             }
 
             val titleH = 52f
-            val padL   = 58f; val padR = 12f
+            val padL   = 12f; val padR = 12f   // убираем место для Y подписей
             val padT   = titleH + 4f; val padB = 10f
             val plotRect = RectF(padL, padT, W - padR, H - padB)
             val cW = plotRect.width(); val cH = plotRect.height()
-            val yMin = 0f; val yMax = 100f
+
             val n = 7
             val todayRightExtra = 0.55f
             val xRange = (n - 1).toFloat() + todayRightExtra
 
+            // Общий диапазон Y — объединяем оба ряда
+            val allValues = calData.toList() + stpData.toList()
+            val validValues = allValues.filter { it > 0f }
+            val yMin = 0f
+            val yMax = if (validValues.isEmpty()) 10000f
+                       else (validValues.max() * 1.15f).coerceAtLeast(100f)
+
             fun yPx(v: Float) = plotRect.top + cH * (1f - (v - yMin) / (yMax - yMin))
             fun xPx(i: Float) = plotRect.left + (i / xRange) * cW
-
-            val calPcts = FloatArray(7) { calPct(calData[it]) }
-            val stpPcts = FloatArray(7) { stepsPct(stpData[it]) }
 
             // ── Заголовок ─────────────────────────────────────────────────
             val uPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -147,21 +142,14 @@ class ActivityWidget : AppWidgetProvider() {
                 canvas.drawRect(plotRect, it)
             }
 
-            // ── Сетка ─────────────────────────────────────────────────────
+            // ── Сетка горизонтальная (без подписей) ───────────────────────
             val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#55444455"); strokeWidth = 0.8f
                 pathEffect = DashPathEffect(floatArrayOf(9f, 8f), 0f)
             }
-            val yLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#778899"); textSize = 19f; textAlign = Paint.Align.RIGHT
-            }
-            var g = 0f
-            while (g <= 100f) {
-                val gy = yPx(g)
+            for (pct in listOf(0.2f, 0.4f, 0.6f, 0.8f)) {
+                val gy = plotRect.top + cH * pct
                 canvas.drawLine(plotRect.left, gy, plotRect.right, gy, gridPaint)
-                if (g == 0f || g == 60f || g == 100f)
-                    canvas.drawText(if (g == 0f) "0" else "${g.toInt()}%", padL - 6f, gy + 7f, yLabelPaint)
-                g += 20f
             }
 
             // ── TODAY box ─────────────────────────────────────────────────
@@ -194,10 +182,10 @@ class ActivityWidget : AppWidgetProvider() {
             }
             for (i in 1..5) canvas.drawText(dates[i], xPx(i.toFloat()), labelY, datePaint)
 
-            // ── Steps линия + подписи НАД линией ─────────────────────────
+            // ── Steps линия + подписи НАД ─────────────────────────────────
             val stpPath = Path()
             for (i in 0 until n) {
-                val px = xPx(i.toFloat()); val py = yPx(stpPcts[i])
+                val px = xPx(i.toFloat()); val py = yPx(stpData[i])
                 if (i == 0) stpPath.moveTo(px, py) else stpPath.lineTo(px, py)
             }
             Paint(Paint.ANTI_ALIAS_FLAG).also {
@@ -209,15 +197,15 @@ class ActivityWidget : AppWidgetProvider() {
                 color = Color.parseColor(COLOR_STP); textSize = 17f; textAlign = Paint.Align.CENTER
             }
             for (i in 0 until n) {
-                val px = xPx(i.toFloat()); val py = yPx(stpPcts[i])
+                val px = xPx(i.toFloat()); val py = yPx(stpData[i])
                 val lbl = if (stpData[i] > 0f) "${stpData[i].toInt()}" else "-"
                 canvas.drawText(lbl, px, py - 8f, stpLabel)
             }
 
-            // ── Calories линия + подписи ПОД линией ──────────────────────
+            // ── Calories линия + подписи ПОД ──────────────────────────────
             val calPath = Path()
             for (i in 0 until n) {
-                val px = xPx(i.toFloat()); val py = yPx(calPcts[i])
+                val px = xPx(i.toFloat()); val py = yPx(calData[i])
                 if (i == 0) calPath.moveTo(px, py) else calPath.lineTo(px, py)
             }
             Paint(Paint.ANTI_ALIAS_FLAG).also {
@@ -229,7 +217,7 @@ class ActivityWidget : AppWidgetProvider() {
                 color = Color.parseColor(COLOR_CAL); textSize = 17f; textAlign = Paint.Align.CENTER
             }
             for (i in 0 until n) {
-                val px = xPx(i.toFloat()); val py = yPx(calPcts[i])
+                val px = xPx(i.toFloat()); val py = yPx(calData[i])
                 val lbl = if (calData[i] > 0f) "${calData[i].toInt()}" else "-"
                 canvas.drawText(lbl, px, py + 24f, calLabel)
             }
