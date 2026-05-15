@@ -7,20 +7,16 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.database.Cursor
 import android.graphics.*
+import android.net.Uri
 import android.os.Bundle
 import android.widget.RemoteViews
-import androidx.health.connect.client.HealthConnectClient
-import androidx.health.connect.client.records.StepsRecord
-import androidx.health.connect.client.request.ReadRecordsRequest
-import androidx.health.connect.client.time.TimeRangeFilter
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
-import java.time.LocalDate
-import java.time.ZoneId
 import java.util.*
 
 class ActivityWidget : AppWidgetProvider() {
@@ -49,17 +45,12 @@ class ActivityWidget : AppWidgetProvider() {
 
         fun updateWidget(context: Context, awm: AppWidgetManager, widgetId: Int) {
             CoroutineScope(Dispatchers.IO).launch {
-                val (cal, stp) = fetchData(context)
+                val cal = fetchCalories(context)
+                val stp = fetchStepsContentResolver(context)
                 val rv = RemoteViews(context.packageName, R.layout.widget_activity_chart)
                 rv.setImageViewBitmap(R.id.activity_chart_image, buildChartBitmap(cal, stp))
                 awm.updateAppWidget(widgetId, rv)
             }
-        }
-
-        suspend fun fetchData(context: Context): Pair<FloatArray, FloatArray> {
-            val cal = fetchCalories(context)
-            val stp = fetchSteps(context)
-            return Pair(cal, stp)
         }
 
         // ── Калории с сервера ─────────────────────────────────────────────
@@ -89,22 +80,59 @@ class ActivityWidget : AppWidgetProvider() {
             } catch (e: Exception) { DEFAULT_CAL }
         }
 
-        // ── Шаги из Health Connect ─────────────────────────────────────────
-        suspend fun fetchSteps(context: Context): FloatArray {
+        // ── Шаги через ContentResolver из Health Connect ──────────────────
+        fun fetchStepsContentResolver(context: Context): FloatArray {
+            val result = FloatArray(7) { 0f }
             return try {
-                val client = HealthConnectClient.getOrCreate(context)
-                val today  = LocalDate.now(ZoneId.systemDefault())
-                val result = FloatArray(7)
-                for (i in 0..6) {
-                    val date  = today.minusDays((6 - i).toLong())
-                    val start = date.atStartOfDay(ZoneId.systemDefault()).toInstant()
-                    val end   = date.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant()
-                    val req   = ReadRecordsRequest(
-                        StepsRecord::class,
-                        TimeRangeFilter.between(start, end)
-                    )
-                    val resp  = client.readRecords(req)
-                    result[i] = resp.records.sumOf { it.count }.toFloat()
+                val cal = Calendar.getInstance()
+                for (i in 6 downTo 0) {
+                    val dayEnd = Calendar.getInstance().apply {
+                        add(Calendar.DAY_OF_YEAR, -(6 - i) * -1 + 6 - i - (6 - i))
+                        set(Calendar.HOUR_OF_DAY, 23)
+                        set(Calendar.MINUTE, 59)
+                        set(Calendar.SECOND, 59)
+                        set(Calendar.MILLISECOND, 999)
+                        add(Calendar.DAY_OF_YEAR, -(6 - i))
+                    }
+                    val dayStart = Calendar.getInstance().apply {
+                        timeInMillis = dayEnd.timeInMillis
+                        set(Calendar.HOUR_OF_DAY, 0)
+                        set(Calendar.MINUTE, 0)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }
+
+                    // Health Connect ContentResolver URI
+                    val uri = Uri.parse("content://androidx.health.platform.client.provider/health_data")
+                    var cursor: Cursor? = null
+                    try {
+                        cursor = context.contentResolver.query(
+                            uri,
+                            null,
+                            "data_type = ? AND start_time >= ? AND end_time <= ?",
+                            arrayOf("Steps", dayStart.timeInMillis.toString(), dayEnd.timeInMillis.toString()),
+                            null
+                        )
+                        var total = 0L
+                        cursor?.use {
+                            while (it.moveToNext()) {
+                                val idx = it.getColumnIndex("count")
+                                if (idx >= 0) total += it.getLong(idx)
+                            }
+                        }
+                        result[6 - i] = total.toFloat()
+                    } catch (e: Exception) {
+                        // попробуем альтернативный URI
+                        try {
+                            val uri2 = Uri.parse("content://com.google.android.apps.healthdata/data_type/steps_daily_summary")
+                            val c2 = context.contentResolver.query(uri2, null,
+                                "start_time >= ? AND end_time <= ?",
+                                arrayOf(dayStart.timeInMillis.toString(), dayEnd.timeInMillis.toString()), null)
+                            var total2 = 0L
+                            c2?.use { while (it.moveToNext()) { total2 += it.getLong(0) } }
+                            result[6 - i] = total2.toFloat()
+                        } catch (e2: Exception) { /* оставляем 0 */ }
+                    }
                 }
                 result
             } catch (e: Exception) { DEFAULT_STP }
@@ -144,29 +172,23 @@ class ActivityWidget : AppWidgetProvider() {
 
             // ── Заголовок ─────────────────────────────────────────────────
             val uPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#888899"); textSize = 23f
-                typeface = Typeface.MONOSPACE
+                color = Color.parseColor("#888899"); textSize = 23f; typeface = Typeface.MONOSPACE
             }
             val calPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor(COLOR_CAL); textSize = 23f
-                typeface = Typeface.MONOSPACE
+                color = Color.parseColor(COLOR_CAL); textSize = 23f; typeface = Typeface.MONOSPACE
             }
             val stpPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor(COLOR_STP); textSize = 23f
-                typeface = Typeface.MONOSPACE
+                color = Color.parseColor(COLOR_STP); textSize = 23f; typeface = Typeface.MONOSPACE
             }
-            val charW    = uPaint.measureText("_")
-            val leftU    = "___"
-            val leftUW   = uPaint.measureText(leftU)
+            val leftU = "___"; val leftUW = uPaint.measureText(leftU)
             val calWordW = calPaint.measureText("calories")
+            val charW = uPaint.measureText("_")
             val rightCnt = ((W - padR - padL - leftUW - calWordW) / charW).toInt()
-            val line1Y   = padT - 26f
-            val line2Y   = padT - 4f
 
-            canvas.drawText(leftU, padL, line1Y, uPaint)
-            canvas.drawText("calories", padL + leftUW, line1Y, calPaint)
-            canvas.drawText("_".repeat(rightCnt), padL + leftUW + calWordW, line1Y, uPaint)
-            canvas.drawText("steps", padL + leftUW, line2Y, stpPaint)
+            canvas.drawText(leftU, padL, padT - 26f, uPaint)
+            canvas.drawText("calories", padL + leftUW, padT - 26f, calPaint)
+            canvas.drawText("_".repeat(rightCnt), padL + leftUW + calWordW, padT - 26f, uPaint)
+            canvas.drawText("steps", padL + leftUW, padT - 4f, stpPaint)
 
             // ── Заливка + рамка ───────────────────────────────────────────
             Paint(Paint.ANTI_ALIAS_FLAG).also {
@@ -178,7 +200,7 @@ class ActivityWidget : AppWidgetProvider() {
                 canvas.drawRect(plotRect, it)
             }
 
-            // ── Сетка + подписи Y ─────────────────────────────────────────
+            // ── Сетка ─────────────────────────────────────────────────────
             val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#55444455"); strokeWidth = 0.8f
                 pathEffect = DashPathEffect(floatArrayOf(9f, 8f), 0f)
@@ -198,10 +220,8 @@ class ActivityWidget : AppWidgetProvider() {
             // ── TODAY box ─────────────────────────────────────────────────
             val todayIdx = n - 1
             val todayXc  = xPx(todayIdx.toFloat())
-            val halfL = cW / xRange * 0.46f
-            val halfR = cW / xRange * 0.52f
+            val halfL = cW / xRange * 0.46f; val halfR = cW / xRange * 0.52f
             val boxRF = RectF(todayXc - halfL, plotRect.top, todayXc + halfR, plotRect.bottom)
-
             for ((lw, alpha) in listOf(14f to 20, 9f to 40, 5f to 80, 2.5f to 140)) {
                 Paint(Paint.ANTI_ALIAS_FLAG).also {
                     it.color = Color.argb(alpha, 0x4C, 0xAF, 0x50)
@@ -215,7 +235,7 @@ class ActivityWidget : AppWidgetProvider() {
                 canvas.drawRoundRect(boxRF, 6f, 6f, it)
             }
 
-            // ── "today" + даты ─────────────────────────────────────────────
+            // ── Даты ─────────────────────────────────────────────────────
             val labelY = plotRect.bottom - 8f
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.parseColor("#4CAF50"); it.textSize = 19f
@@ -227,42 +247,42 @@ class ActivityWidget : AppWidgetProvider() {
             }
             for (i in 1..5) canvas.drawText(dates[i], xPx(i.toFloat()), labelY, datePaint)
 
-            // ── Steps линия + подписи НАД линией ─────────────────────────
-            val stpLinePath = Path()
+            // ── Steps линия ───────────────────────────────────────────────
+            val stpPath = Path()
             for (i in 0 until n) {
                 val px = xPx(i.toFloat()); val py = yPx(stpPcts[i])
-                if (i == 0) stpLinePath.moveTo(px, py) else stpLinePath.lineTo(px, py)
+                if (i == 0) stpPath.moveTo(px, py) else stpPath.lineTo(px, py)
             }
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.parseColor(COLOR_STP); it.strokeWidth = 1.8f
                 it.style = Paint.Style.STROKE; it.alpha = 220
-                canvas.drawPath(stpLinePath, it)
+                canvas.drawPath(stpPath, it)
             }
             val stpLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor(COLOR_STP); textSize = 17f; textAlign = Paint.Align.CENTER
             }
             for (i in 0 until n) {
-                val px  = xPx(i.toFloat()); val py = yPx(stpPcts[i])
+                val px = xPx(i.toFloat()); val py = yPx(stpPcts[i])
                 val lbl = if (stpData[i] > 0f) "${stpData[i].toInt()}" else "-"
                 canvas.drawText(lbl, px, py - 8f, stpLabel)
             }
 
-            // ── Calories линия + подписи ПОД линией ──────────────────────
-            val calLinePath = Path()
+            // ── Calories линия ────────────────────────────────────────────
+            val calPath = Path()
             for (i in 0 until n) {
                 val px = xPx(i.toFloat()); val py = yPx(calPcts[i])
-                if (i == 0) calLinePath.moveTo(px, py) else calLinePath.lineTo(px, py)
+                if (i == 0) calPath.moveTo(px, py) else calPath.lineTo(px, py)
             }
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.parseColor(COLOR_CAL); it.strokeWidth = 2.2f
                 it.style = Paint.Style.STROKE; it.alpha = 220
-                canvas.drawPath(calLinePath, it)
+                canvas.drawPath(calPath, it)
             }
             val calLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor(COLOR_CAL); textSize = 17f; textAlign = Paint.Align.CENTER
             }
             for (i in 0 until n) {
-                val px  = xPx(i.toFloat()); val py = yPx(calPcts[i])
+                val px = xPx(i.toFloat()); val py = yPx(calPcts[i])
                 val lbl = if (calData[i] > 0f) "${calData[i].toInt()}" else "-"
                 canvas.drawText(lbl, px, py + 24f, calLabel)
             }
