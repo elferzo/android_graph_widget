@@ -96,7 +96,7 @@ class ActivityWidget : AppWidgetProvider() {
             }
 
             val titleH = 52f
-            val padL   = 12f; val padR = 12f
+            val padL   = 20f; val padR = 12f
             val padT   = titleH + 4f; val padB = 10f
             val plotRect = RectF(padL, padT, W - padR, H - padB)
             val cW = plotRect.width(); val cH = plotRect.height()
