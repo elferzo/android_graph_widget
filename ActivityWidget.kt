@@ -96,7 +96,7 @@ class ActivityWidget : AppWidgetProvider() {
             }
 
             val titleH = 52f
-            val padL   = 20f; val padR = 12f
+            val padL   = 58f; val padR = 12f
             val padT   = titleH + 4f; val padB = 10f
             val plotRect = RectF(padL, padT, W - padR, H - padB)
             val cW = plotRect.width(); val cH = plotRect.height()
@@ -148,6 +148,20 @@ class ActivityWidget : AppWidgetProvider() {
             for (pct in listOf(0.2f, 0.4f, 0.6f, 0.8f)) {
                 val gy = plotRect.top + cH * pct
                 canvas.drawLine(plotRect.left, gy, plotRect.right, gy, gridPaint)
+            }
+
+            // ── Подписи оси Y — невидимые, только выравнивают отступ ─────
+            val yLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.argb(0, 0x77, 0x88, 0x99)
+                textSize = 19f; textAlign = Paint.Align.RIGHT
+            }
+            for (label in listOf("0", "60%", "100%")) {
+                val gy = when (label) {
+                    "0"    -> yPxStp(0f)
+                    "60%"  -> yPxStp(STP_MAX * 0.6f)
+                    else   -> yPxStp(STP_MAX)
+                }
+                canvas.drawText(label, padL - 6f, gy + 7f, yLabelPaint)
             }
 
             // ── TODAY box ─────────────────────────────────────────────────
