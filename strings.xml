@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">GraphWidget</string>
-    <string name="widget_description">Sleep / Recovery Chart</string>
-    <string name="widget_activity_description">Steps / Calories Chart</string>
+    <string name="widget_description">График тренировок Garmin на главном экране</string>
+    <string name="widget_activity_description">Активность Garmin: шаги, калории, пульс</string>
 </resources>

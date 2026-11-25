@@ -9,10 +9,10 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.*
 import android.os.Bundle
+import android.util.Log
 import android.widget.RemoteViews
+import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -20,7 +20,6 @@ class GraphWidget : AppWidgetProvider() {
 
     companion object {
         const val ACTION_UPDATE  = "com.example.graphwidget.ACTION_UPDATE"
-        const val SERVER_URL     = "http://178.208.86.99:5001/recovery"
         const val PREFS_NAME     = "graphwidget_prefs"
         const val KEY_DATA       = "last_data"
         const val COLOR_REC      = "#FFB300"
@@ -47,22 +46,23 @@ class GraphWidget : AppWidgetProvider() {
 
         fun fetchScores(context: Context): Pair<FloatArray, FloatArray> {
             return try {
-                val conn = URL(SERVER_URL).openConnection() as HttpURLConnection
-                conn.connectTimeout = 5000; conn.readTimeout = 5000
-                conn.requestMethod = "GET"
-                if (conn.responseCode == 200) {
-                    val body = conn.inputStream.bufferedReader().readText()
-                    val json = JSONObject(body)
-                    val rec  = json.getJSONArray("scores")
-                    val slp  = json.optJSONArray("sleep")
-                    val recArr = FloatArray(rec.length()) { rec.getDouble(it).toFloat() }
-                    val slpArr = if (slp != null) FloatArray(slp.length()) { slp.getDouble(it).toFloat() }
-                                 else DEFAULT_SLP
-                    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                        .edit().putString(KEY_DATA, body).apply()
-                    Pair(recArr, slpArr)
-                } else loadCached(context)
-            } catch (e: Exception) { loadCached(context) }
+                val (rec, slp) = GarminClient.fetchScores(context)
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit().putString(KEY_DATA, cacheJson(rec, slp)).apply()
+                Pair(rec, slp)
+            } catch (e: Exception) {
+                Log.e("GraphWidget", "Garmin: ${e.javaClass.simpleName}: ${e.message}")
+                loadCached(context)
+            }
+        }
+
+        /** Кэш пишется в том же формате, что отдавал старый сервер: {"scores":[...],"sleep":[...]} */
+        private fun cacheJson(rec: FloatArray, slp: FloatArray): String {
+            val recArr = JSONArray()
+            for (v in rec) recArr.put(v.toDouble())
+            val slpArr = JSONArray()
+            for (v in slp) slpArr.put(v.toDouble())
+            return JSONObject().put("scores", recArr).put("sleep", slpArr).toString()
         }
 
         fun loadCached(context: Context): Pair<FloatArray, FloatArray> {

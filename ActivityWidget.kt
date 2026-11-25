@@ -10,9 +10,8 @@ import android.content.Intent
 import android.graphics.*
 import android.os.Bundle
 import android.widget.RemoteViews
+import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -20,8 +19,6 @@ class ActivityWidget : AppWidgetProvider() {
 
     companion object {
         const val ACTION_UPDATE       = "com.example.graphwidget.ACTION_UPDATE_ACTIVITY"
-        const val SERVER_URL_ACTIVITY = "http://178.208.86.99:5001/activity"
-        const val SERVER_URL_STEPS    = "http://178.208.86.99:5001/steps"
         const val PREFS_NAME          = "activitywidget_prefs"
         const val KEY_CALORIES        = "last_calories"
         const val KEY_STEPS           = "last_steps"
@@ -42,8 +39,8 @@ class ActivityWidget : AppWidgetProvider() {
 
         fun updateWidget(context: Context, awm: AppWidgetManager, widgetId: Int) {
             Thread {
-                val cal = fetchArray(context, SERVER_URL_ACTIVITY, "calories", KEY_CALORIES, DEFAULT_CAL)
-                val stp = fetchArray(context, SERVER_URL_STEPS, "steps", KEY_STEPS, DEFAULT_STP)
+                val cal = fetchCalories(context)
+                val stp = fetchSteps(context)
                 val rv = RemoteViews(context.packageName, R.layout.widget_activity_chart)
                 rv.setImageViewBitmap(R.id.activity_chart_image, buildChartBitmap(cal, stp))
                 awm.updateAppWidgetOptions(widgetId, Bundle())
@@ -51,23 +48,39 @@ class ActivityWidget : AppWidgetProvider() {
             }.start()
         }
 
-        fun fetchArray(
-            context: Context, url: String, key: String,
-            cacheKey: String, default: FloatArray
-        ): FloatArray {
+        fun fetchSteps(context: Context): FloatArray {
             return try {
-                val conn = URL(url).openConnection() as HttpURLConnection
-                conn.connectTimeout = 5000; conn.readTimeout = 5000
-                conn.requestMethod = "GET"
-                if (conn.responseCode == 200) {
-                    val body = conn.inputStream.bufferedReader().readText()
-                    val arr  = JSONObject(body).getJSONArray(key)
-                    val result = FloatArray(arr.length()) { arr.getDouble(it).toFloat() }
-                    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                        .edit().putString(cacheKey, body).apply()
-                    result
-                } else loadCached(context, cacheKey, key, default)
-            } catch (e: Exception) { loadCached(context, cacheKey, key, default) }
+                val arr = GarminClient.fetchSteps(context)
+                cacheJson(context, KEY_STEPS, "steps", arr)
+                arr
+            } catch (e: GarminClient.AuthException) {
+                loadCached(context, KEY_STEPS, "steps", DEFAULT_STP)
+            } catch (e: Exception) {
+                loadCached(context, KEY_STEPS, "steps", DEFAULT_STP)
+            }
+        }
+
+        fun fetchCalories(context: Context): FloatArray {
+            return try {
+                val arr = GarminClient.fetchCalories(context)
+                cacheJson(context, KEY_CALORIES, "calories", arr)
+                arr
+            } catch (e: GarminClient.AuthException) {
+                loadCached(context, KEY_CALORIES, "calories", DEFAULT_CAL)
+            } catch (e: Exception) {
+                loadCached(context, KEY_CALORIES, "calories", DEFAULT_CAL)
+            }
+        }
+
+        /** Кэш в формате старого сервера: {"steps":[...]} — loadCached не менялся. */
+        fun cacheJson(context: Context, cacheKey: String, key: String, values: FloatArray) {
+            try {
+                val arr = JSONArray()
+                for (v in values) arr.put(v.toInt())
+                val body = JSONObject().put(key, arr).toString()
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit().putString(cacheKey, body).apply()
+            } catch (e: Exception) { }
         }
 
         fun loadCached(context: Context, cacheKey: String, key: String, default: FloatArray): FloatArray {

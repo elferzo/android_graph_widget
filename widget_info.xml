@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Провайдер виджета GraphWidget.
+    ВНИМАНИЕ: android:initialLayout обязан совпадать с R.layout.<имя>,
+    которое вызывает сам GraphWidget.kt. Если там другое имя —
+    AAPT упадёт на сборке с "resource layout/widget_calorie_chart not found".
+-->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:minWidth="250dp"
-    android:minHeight="110dp"
-    android:targetCellWidth="4"
-    android:targetCellHeight="2"
-    android:updatePeriodMillis="300000"
     android:initialLayout="@layout/widget_calorie_chart"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
     android:resizeMode="horizontal|vertical"
-    android:widgetCategory="home_screen"
-    android:widgetFeatures="reconfigurable"
-    android:description="@string/widget_description" />
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

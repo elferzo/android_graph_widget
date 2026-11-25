@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ActivityWidget: единственный элемент разметки. id "activity_chart_image" обязан совпадать
+     с R.id.activity_chart_image в ActivityWidget.updateWidget() — код вызывает только setImageViewBitmap. -->
 <ImageView xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/activity_chart_image"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:scaleType="fitXY"
-    android:background="@null" />
+    android:background="#CC15151C"
+    android:contentDescription="@string/widget_activity_description"
+    android:scaleType="fitCenter" />
