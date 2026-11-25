@@ -1,30 +1,36 @@
-#!/bin/bash
-# setup_project.sh — собирает Gradle-проект из плоского набора файлов.
-# Запускать из корня репозитория, где лежат все .kt / .xml / .txt из набора.
-# Скрипт САМ создаёт скелет проекта, поэтому готовый Gradle-проект не нужен.
-set -e
+#!/usr/bin/env bash
+# setup_project.sh — раскладывает плоские файлы репозитория в структуру Gradle-проекта
+# и создаёт отсутствующий скелет (settings.gradle, gradle.properties, иконку).
+# Запуск из КОРНЯ репозитория, где лежат .kt и .xml:   ./setup_project.sh
+set -euo pipefail
 
-PKG="com/example/graphwidget"
+PKG="com.example.graphwidget"
+PKG_PATH="${PKG//.//}"
 SRC="app/src/main"
+JAVA="$SRC/java/$PKG_PATH"
+RES="$SRC/res"
 
-NEED="MainActivity.kt GarminClient.kt GraphWidget.kt ActivityWidget.kt BootReceiver.kt"
-NEED="$NEED strings.xml widget_info.xml widget_activity_info.xml"
-NEED="$NEED widget_calorie_chart.xml widget_activity_chart.xml"
-NEED="$NEED AndroidManifest.xml"
-
+# ── 1. Все нужные файлы на месте? ────────────────────────────────────────────
 MISSING=""
-for f in $NEED; do
-    [ -f "$f" ] || MISSING="$MISSING $f"
+for f in GarminClient.kt GraphWidget.kt ActivityWidget.kt MainActivity.kt BootReceiver.kt \
+         widget_calorie_chart.xml widget_activity_chart.xml \
+         widget_info.xml widget_activity_info.xml strings.xml \
+         AndroidManifest.xml app_build_gradle.txt; do
+  [ -f "$f" ] || MISSING="$MISSING $f"
 done
 if [ -n "$MISSING" ]; then
-    echo "ОШИБКА: нет файлов:$MISSING" >&2
-    exit 1
+  echo "ОШИБКА: нет файлов:$MISSING" >&2
+  echo "Запускайте скрипт из корня репозитория, где лежат эти файлы." >&2
+  exit 1
 fi
 
-mkdir -p "$SRC/java/$PKG" "$SRC/res/values" "$SRC/res/xml" "$SRC/res/layout"
+# ── 2. Каталоги ──────────────────────────────────────────────────────────────
+mkdir -p "$JAVA" "$RES/layout" "$RES/xml" "$RES/values" \
+         "$RES/drawable" "$RES/mipmap-anydpi-v26" "$RES/mipmap-anydpi"
 
-if [ ! -f settings.gradle ] && [ ! -f settings.gradle.kts ]; then
-    cat > settings.gradle <<'EOF'
+# ── 3. Скелет Gradle (не перезаписываем существующее) ────────────────────────
+if [ ! -f settings.gradle ]; then
+  cat > settings.gradle <<'EOF'
 pluginManagement {
     repositories {
         google()
@@ -33,6 +39,7 @@ pluginManagement {
     }
 }
 dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
@@ -41,66 +48,93 @@ dependencyResolutionManagement {
 rootProject.name = "GraphWidget"
 include ':app'
 EOF
-    echo "  + settings.gradle (создан)"
-else
-    echo "  = settings.gradle уже есть, не трогаю"
+  echo "создан settings.gradle"
 fi
 
 if [ ! -f gradle.properties ]; then
-    cat > gradle.properties <<'EOF'
+  cat > gradle.properties <<'EOF'
 org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
 android.useAndroidX=true
 android.nonTransitiveRClass=true
+kotlin.code.style=official
 EOF
-    echo "  + gradle.properties (создан)"
-else
-    echo "  = gradle.properties уже есть, не трогаю"
+  echo "создан gradle.properties"
 fi
 
-if [ -f root_build_gradle.txt ]; then
+if [ ! -f build.gradle ]; then
+  if [ -f root_build_gradle.txt ]; then
     cp root_build_gradle.txt build.gradle
-    echo "  build.gradle <- root_build_gradle.txt"
-elif [ ! -f build.gradle ]; then
+    echo "build.gradle из root_build_gradle.txt"
+  else
     cat > build.gradle <<'EOF'
 plugins {
     id 'com.android.application' version '8.9.3' apply false
     id 'org.jetbrains.kotlin.android' version '2.0.21' apply false
 }
 EOF
-    echo "  build.gradle (создан по умолчанию)"
-else
-    echo "  = build.gradle уже есть, не трогаю"
+    echo "build.gradle сгенерирован (AGP 8.9.3 / Kotlin 2.0.21)"
+  fi
 fi
 
-if [ -f app_build_gradle.txt ]; then
-    cp app_build_gradle.txt app/build.gradle
-    echo "  app/build.gradle <- app_build_gradle.txt"
-else
-    echo "ОШИБКА: нет app_build_gradle.txt" >&2
-    exit 1
-fi
-
-# Исходники кладём в src/main/java — этот каталог используется ВСЕГДА,
-# независимо от sourceSets в build.gradle.
-for f in MainActivity.kt GarminClient.kt GraphWidget.kt ActivityWidget.kt BootReceiver.kt; do
-    cp "$f" "$SRC/java/$PKG/"
-    echo "  java/$PKG/$f"
-done
-
-cp strings.xml "$SRC/res/values/"
-echo "  res/values/strings.xml"
-
-for f in widget_info.xml widget_activity_info.xml; do
-    cp "$f" "$SRC/res/xml/"
-    echo "  res/xml/$f"
-done
-
-for f in widget_calorie_chart.xml widget_activity_chart.xml; do
-    cp "$f" "$SRC/res/layout/"
-    echo "  res/layout/$f"
-done
-
+# ── 4. Исходники и ресурсы ───────────────────────────────────────────────────
+cp GarminClient.kt GraphWidget.kt ActivityWidget.kt MainActivity.kt BootReceiver.kt "$JAVA/"
+cp widget_calorie_chart.xml widget_activity_chart.xml "$RES/layout/"
+cp widget_info.xml widget_activity_info.xml "$RES/xml/"
+cp strings.xml "$RES/values/"
 cp AndroidManifest.xml "$SRC/AndroidManifest.xml"
-echo "  AndroidManifest.xml"
+cp app_build_gradle.txt app/build.gradle
 
-echo "Готово."
+# ── 5. Иконка запуска (векторно, без PNG) ────────────────────────────────────
+cat > "$RES/drawable/ic_launcher_background.xml" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#12161C" />
+</shape>
+EOF
+
+cat > "$RES/drawable/ic_launcher_foreground.xml" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFB300"
+        android:pathData="M26,64 L26,78 L38,78 L38,64 Z" />
+    <path android:fillColor="#29B6F6"
+        android:pathData="M42,50 L42,78 L54,78 L54,50 Z" />
+    <path android:fillColor="#FFB300"
+        android:pathData="M58,40 L58,78 L70,78 L70,40 Z" />
+    <path android:fillColor="#29B6F6"
+        android:pathData="M74,30 L74,78 L86,78 L86,30 Z" />
+</vector>
+EOF
+
+cat > "$RES/mipmap-anydpi-v26/ic_launcher.xml" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+EOF
+
+cat > "$RES/mipmap-anydpi-v26/ic_launcher_round.xml" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+EOF
+
+cat > "$RES/mipmap-anydpi/ic_launcher.xml" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/ic_launcher_background" />
+    <item android:drawable="@drawable/ic_launcher_foreground" />
+</layer-list>
+EOF
+
+cp "$RES/mipmap-anydpi/ic_launcher.xml" "$RES/mipmap-anydpi/ic_launcher_round.xml"
+
+echo "готово: $JAVA"
