@@ -1,6 +1,6 @@
 #!/bin/bash
-# setup_project.sh — раскладывает исходники и ресурсы виджетов по проекту.
-# Запускать из папки, где лежат все .kt / .xml / .txt из набора.
+# setup_project.sh - раскладывает исходники и ресурсы виджетов по проекту.
+# Запускать из корня Gradle-проекта, где лежат все .kt / .xml / .txt из набора.
 set -e
 
 PKG="com/example/graphwidget"
@@ -11,9 +11,13 @@ if [ ! -d "$SRC" ]; then
     exit 1
 fi
 
-# Все нужные файлы должны лежать рядом со скриптом. Проверяем разом,
-# чтобы не оборваться на середине и не оставить проект в полускопированном виде.
-NEED="MainActivity.kt GarminClient.kt GraphWidget.kt ActivityWidget.kt BootReceiver.kt strings.xml widget_info.xml widget_activity_info.xml AndroidManifest.xml app_build_gradle.txt"
+# Обязательные файлы. root_build_gradle.txt - отдельно: он нужен только
+# если в проекте ещё нет своего build.gradle.
+NEED="MainActivity.kt GarminClient.kt GraphWidget.kt ActivityWidget.kt BootReceiver.kt"
+NEED="$NEED strings.xml widget_info.xml widget_activity_info.xml"
+NEED="$NEED widget_calorie_chart.xml widget_activity_chart.xml"
+NEED="$NEED AndroidManifest.xml app_build_gradle.txt"
+
 MISSING=""
 for f in $NEED; do
     [ -f "$f" ] || MISSING="$MISSING $f"
@@ -24,8 +28,6 @@ if [ -n "$MISSING" ]; then
     exit 1
 fi
 
-# app_build_gradle.txt должен быть версией 1.4 (versionCode 5).
-# Исходная версия 1.3 (versionCode 4) молча откатила бы изменения.
 if ! grep -q 'versionCode 5' app_build_gradle.txt; then
     echo "ВНИМАНИЕ: в app_build_gradle.txt нет versionCode 5." >&2
     echo "Похоже, это исходная версия 1.3. Сборка продолжится, но проверь файл." >&2
@@ -34,6 +36,7 @@ fi
 mkdir -p "$SRC/kotlin/$PKG"
 mkdir -p "$SRC/res/xml"
 mkdir -p "$SRC/res/values"
+mkdir -p "$SRC/res/layout"
 
 for f in MainActivity.kt GarminClient.kt GraphWidget.kt ActivityWidget.kt BootReceiver.kt; do
     cp "$f" "$SRC/kotlin/$PKG/"
@@ -46,6 +49,13 @@ echo "  res/values/strings.xml"
 for f in widget_info.xml widget_activity_info.xml; do
     cp "$f" "$SRC/res/xml/"
     echo "  res/xml/$f"
+done
+
+# Лейауты виджетов. Имена сохраняются как есть: R.layout.widget_calorie_chart
+# и R.layout.widget_activity_chart жёстко прописаны в GraphWidget / ActivityWidget.
+for f in widget_calorie_chart.xml widget_activity_chart.xml; do
+    cp "$f" "$SRC/res/layout/"
+    echo "  res/layout/$f"
 done
 
 cp AndroidManifest.xml "$SRC/AndroidManifest.xml"

@@ -299,9 +299,81 @@ object GarminClient {
         val url = "$API/usersummary-service/usersummary/daily/$dn?calendarDate=$date"
         return JSONObject(apiGet(ctx, url))
     }
+
+    // ─────────────────────────────────────────────────────────────
+    //  Сетевой слой
+    //  ВНИМАНИЕ: этот блок в присланном файле отсутствовал (обрыв
+    //  после dailySummary). Восстановлен по местам вызова, это НЕ
+    //  оригинал. Сигнатуры выведены точно, тела написаны заново.
+    // ─────────────────────────────────────────────────────────────
+
+    /** Проглатывает любое исключение: виджет рисует 0 вместо падения. */
+    private fun <T> safe(block: () -> T?): T? =
+        try { block() } catch (e: Exception) { null }
+
+    /** GET к API с подстановкой Bearer-токена. */
+    private fun apiGet(ctx: Context, url: String): String =
+        request(url, "GET", { token(ctx).token }, null, null)
+
+    /**
+     * Единственная точка HTTP. Одна повторная попытка при 401 (сброс
+     * кэша токена) и одна при сетевом сбое.
+     */
+    private fun request(
+        url: String,
+        method: String,
+        tokenProvider: (() -> String?)?,
+        body: String?,
+        authHeader: String?
+    ): String {
+        var lastCode = -1
+        var attempt = 0
+        while (true) {
+            attempt++
+            try {
+                val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                    requestMethod = method
+                    connectTimeout = 15_000
+                    readTimeout = 20_000
+                    instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", UA)
+                    setRequestProperty("Accept", "application/json")
+                    authHeader?.let { setRequestProperty("Authorization", it) }
+                    if (authHeader == null) {
+                        tokenProvider?.invoke()?.let {
+                            if (it.isNotEmpty()) setRequestProperty("Authorization", "Bearer $it")
+                        }
+                    }
+                    if (body != null) {
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                    }
+                }
+
+                if (body != null) {
+                    conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                }
+
+                lastCode = conn.responseCode
+                val stream = if (lastCode in 200..299) conn.inputStream else conn.errorStream
+                val text = stream?.bufferedReader()?.use { it.readText() } ?: ""
+                conn.disconnect()
+
+                if (lastCode in 200..299) return text
+
+                if (lastCode == 401 && tokenProvider != null && attempt < 2) {
+                    invalidateToken()
+                    continue
+                }
+                throw IOException("HTTP $lastCode: ${text.take(180)}")
+
+            } catch (e: IOException) {
+                // Свой же «HTTP …» пробрасываем без повтора.
+                if (e.message?.startsWith("HTTP ") == true) throw e
+                if (attempt >= 2) throw e
+                // иначе — ещё одна попытка
             }
         }
-        throw IOException("HTTP $lastCode")
     }
 
     private fun invalidateToken() = synchronized(lock) { cachedOAuth2 = null }
