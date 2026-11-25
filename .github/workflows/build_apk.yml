@@ -28,38 +28,52 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Setup Android SDK
+      - name: Ensure Android SDK packages
+        shell: bash
         run: |
-          set -e
-          SDKMANAGER="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1)"
-          if [ -z "$SDKMANAGER" ]; then
-            echo "::error::sdkmanager не найден в $ANDROID_HOME"
-            exit 1
+          set -u
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "SDK root: $SDK"
+          SDKM="$(ls -d "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | tail -n 1 || true)"
+          if [ -z "$SDKM" ]; then
+            echo "::warning::sdkmanager not found, relying on the preinstalled SDK"
+            exit 0
           fi
-          echo "sdkmanager: $SDKMANAGER"
-          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          echo "sdkmanager: $SDKM"
+          yes | "$SDKM" --sdk_root="$SDK" --licenses > /dev/null 2>&1 || true
+          "$SDKM" --sdk_root="$SDK" "platform-tools" "platforms;android-36" "build-tools;36.0.0" \
+            || echo "::warning::sdkmanager could not install some packages; Gradle will report if they are really missing"
 
-      - name: Preflight - проверить исходники
+      - name: Preflight
+        shell: bash
         run: |
-          MISSING=""
-          for f in MainActivity.kt GarminClient.kt GraphWidget.kt ActivityWidget.kt BootReceiver.kt \
-                   strings.xml widget_info.xml widget_activity_info.xml \
+          set -u
+          missing=0
+          for f in GarminClient.kt GraphWidget.kt ActivityWidget.kt MainActivity.kt BootReceiver.kt \
+                   AndroidManifest.xml strings.xml \
                    widget_calorie_chart.xml widget_activity_chart.xml \
-                   AndroidManifest.xml app_build_gradle.txt root_build_gradle.txt; do
-            [ -f "$f" ] || MISSING="$MISSING $f"
+                   widget_info.xml widget_activity_info.xml \
+                   app_build_gradle.txt root_build_gradle.txt setup_project.sh; do
+            if [ ! -f "$f" ]; then
+              echo "::error::missing file: $f"
+              missing=1
+            fi
           done
-          if [ -n "$MISSING" ]; then
-            echo "::error::В репозитории нет файлов:$MISSING"
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::some source files are missing, aborting before Gradle"
             exit 1
           fi
+          echo "all source files present"
 
       - name: Build APK
+        shell: bash
         run: |
+          set -eu
           chmod +x setup_project.sh
           ./setup_project.sh
-          gradle assembleDebug --stacktrace
+          gradle --no-daemon --stacktrace assembleDebug
           mv app/build/outputs/apk/debug/app-debug.apk graph.apk
+          ls -la graph.apk
 
       - uses: actions/upload-artifact@v4
         with:
