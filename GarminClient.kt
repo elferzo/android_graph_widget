@@ -61,36 +61,34 @@ object GarminClient {
         val slp = FloatArray(7)
         token(ctx)                                  // падаем сразу, если токена нет
         for (i in days.indices) {
+            if (i > 0) pause(250)
             rec[i] = safe { trainingReadiness(ctx, days[i]) } ?: 0f
             slp[i] = safe { sleepScore(ctx, days[i]) } ?: 0f
         }
         return Pair(rec, slp)
     }
 
-    /** Шаги за 7 дней. */
-    fun fetchSteps(ctx: Context): FloatArray {
+    /**
+     * Шаги и калории за 7 дней — ОДНИМ проходом по датам.
+     *
+     * Раньше два ряда запрашивались раздельно: 7 запросов на калории и 7 на шаги,
+     * подряд, 14 штук на каждое обновление виджета. Garmin начинает отдавать 429
+     * на второй половине пачки, поэтому шаги (они шли вторыми) приходили нулями,
+     * а калории — нормально. Теперь один запрос даёт оба поля.
+     */
+    fun fetchActivity(ctx: Context): Pair<FloatArray, FloatArray> {
         val days = lastDays(7)
-        val out = FloatArray(7)
+        val stp = FloatArray(7)
+        val cal = FloatArray(7)
         token(ctx)
         for (i in days.indices) {
-            out[i] = safe {
-                dailySummary(ctx, days[i])?.optDouble("totalSteps", 0.0)?.toFloat()
-            } ?: 0f
+            if (i > 0) pause(250)
+            safe { dailySummary(ctx, days[i]) }?.let { o ->
+                stp[i] = o.optDouble("totalSteps", 0.0).toFloat()
+                cal[i] = o.optDouble("totalKilocalories", 0.0).toFloat()
+            }
         }
-        return out
-    }
-
-    /** Калории за 7 дней. */
-    fun fetchCalories(ctx: Context): FloatArray {
-        val days = lastDays(7)
-        val out = FloatArray(7)
-        token(ctx)
-        for (i in days.indices) {
-            out[i] = safe {
-                dailySummary(ctx, days[i])?.optDouble("totalKilocalories", 0.0)?.toFloat()
-            } ?: 0f
-        }
-        return out
+        return Pair(stp, cal)
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -267,15 +265,19 @@ object GarminClient {
 
         if (trimmed.startsWith("[")) {
             val arr = JSONArray(trimmed)
+            var best: Float? = null
             for (i in 0 until arr.length()) {
-                arr.optJSONObject(i)?.let { scoreOf(it)?.let { s -> return s } }
+                val o = arr.optJSONObject(i) ?: continue
+                val d = o.optString("calendarDate")
+                if (d.isNotEmpty() && d != date) continue   // не путаем дни
+                scoreOf(o)?.let { best = it }               // последний за день
             }
-            return null
+            return best
         }
         if (trimmed.startsWith("{")) {
             val o = JSONObject(trimmed)
             scoreOf(o)?.let { return it }
-            o.optJSONArray("trainingReadinessList")?.let { list ->
+            o.optJSONObject("trainingReadinessList")?.let { list ->
                 for (i in 0 until list.length()) {
                     list.optJSONObject(i)?.let { scoreOf(it)?.let { s -> return s } }
                 }
@@ -288,9 +290,12 @@ object GarminClient {
         val dn = displayName(ctx) ?: return null
         val url = "$API/wellness-service/wellness/dailySleepData/$dn?date=$date&nonSleepBufferMinutes=60"
         val json = JSONObject(apiGet(ctx, url))
-        val v = json.optJSONObject("sleepScores")
-            ?.optJSONObject("overall")
-            ?.optDouble("value", Double.NaN) ?: return null
+        // Garmin кладёт sleepScores внутрь dailySleepDTO; в корне его нет.
+        // Проверяем оба места — старые прошивки отдавали по-разному.
+        val scores = json.optJSONObject("sleepScores")
+            ?: json.optJSONObject("dailySleepDTO")?.optJSONObject("sleepScores")
+            ?: return null
+        val v = scores.optJSONObject("overall")?.optDouble("value", Double.NaN) ?: return null
         return if (v.isNaN()) null else v.toFloat()
     }
 
@@ -312,6 +317,13 @@ object GarminClient {
         try { block() } catch (e: Exception) { null }
 
     /** GET к API с подстановкой Bearer-токена. */
+    /** Пауза между запросами: не бомбим API пачкой. */
+    private fun pause(ms: Long) {
+        try { Thread.sleep(ms) } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+    }
+
     private fun apiGet(ctx: Context, url: String): String =
         request(url, "GET", { token(ctx).token }, null, null)
 
@@ -363,6 +375,11 @@ object GarminClient {
 
                 if (lastCode == 401 && tokenProvider != null && attempt < 2) {
                     invalidateToken()
+                    continue
+                }
+                if (lastCode == 429 && attempt < 4) {
+                    // Garmin притормаживает при пачке запросов — ждём и пробуем снова
+                    pause(1500L * attempt)
                     continue
                 }
                 throw IOException("HTTP $lastCode: ${text.take(180)}")

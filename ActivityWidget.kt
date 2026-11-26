@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.*
 import android.os.Bundle
+import android.util.Log
 import android.widget.RemoteViews
 import org.json.JSONArray
 import org.json.JSONObject
@@ -39,8 +40,9 @@ class ActivityWidget : AppWidgetProvider() {
 
         fun updateWidget(context: Context, awm: AppWidgetManager, widgetId: Int) {
             Thread {
-                val cal = fetchCalories(context)
-                val stp = fetchSteps(context)
+                // Один проход по датам: шаги и калории из одного ответа.
+                // Раньше это были два цикла по 7 запросов, и шаги попадали под 429.
+                val (stp, cal) = fetchActivity(context)
                 val rv = RemoteViews(context.packageName, R.layout.widget_activity_chart)
                 rv.setImageViewBitmap(R.id.activity_chart_image, buildChartBitmap(cal, stp))
                 awm.updateAppWidgetOptions(widgetId, Bundle())
@@ -48,27 +50,18 @@ class ActivityWidget : AppWidgetProvider() {
             }.start()
         }
 
-        fun fetchSteps(context: Context): FloatArray {
+        fun fetchActivity(context: Context): Pair<FloatArray, FloatArray> {
             return try {
-                val arr = GarminClient.fetchSteps(context)
-                cacheJson(context, KEY_STEPS, "steps", arr)
-                arr
-            } catch (e: GarminClient.AuthException) {
-                loadCached(context, KEY_STEPS, "steps", DEFAULT_STP)
+                val (stp, cal) = GarminClient.fetchActivity(context)
+                cacheJson(context, KEY_STEPS, "steps", stp)
+                cacheJson(context, KEY_CALORIES, "calories", cal)
+                Pair(stp, cal)
             } catch (e: Exception) {
-                loadCached(context, KEY_STEPS, "steps", DEFAULT_STP)
-            }
-        }
-
-        fun fetchCalories(context: Context): FloatArray {
-            return try {
-                val arr = GarminClient.fetchCalories(context)
-                cacheJson(context, KEY_CALORIES, "calories", arr)
-                arr
-            } catch (e: GarminClient.AuthException) {
-                loadCached(context, KEY_CALORIES, "calories", DEFAULT_CAL)
-            } catch (e: Exception) {
-                loadCached(context, KEY_CALORIES, "calories", DEFAULT_CAL)
+                Log.e("ActivityWidget", "Garmin: ${e.javaClass.simpleName}: ${e.message}")
+                Pair(
+                    loadCached(context, KEY_STEPS, "steps", DEFAULT_STP),
+                    loadCached(context, KEY_CALORIES, "calories", DEFAULT_CAL)
+                )
             }
         }
 
