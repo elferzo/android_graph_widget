@@ -143,7 +143,11 @@ class ActivityWidget : AppWidgetProvider() {
             canvas.drawText("_".repeat(rightCnt), padL + leftUW + calWordW, padT - 26f, uPaint)
             canvas.drawText("steps", padL + leftUW, padT - 4f, stpPaint)
 
-            // ── Рамка (заливка отключена: плашка прозрачная) ───────
+            // ── Заливка + рамка ───────────────────────────────────────────
+            Paint(Paint.ANTI_ALIAS_FLAG).also {
+                it.color = Color.argb(128, 0x22, 0x22, 0x2E); it.style = Paint.Style.FILL
+                canvas.drawRect(plotRect, it)
+            }
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.BLACK; it.style = Paint.Style.STROKE; it.strokeWidth = 1.2f
                 canvas.drawRect(plotRect, it)

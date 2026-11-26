@@ -139,7 +139,11 @@ class GraphWidget : AppWidgetProvider() {
             // ── Заголовок строка 2:        sleep ─────────────────────────
             canvas.drawText("sleep", padL + leftUW, line2Y, slpPaint)
 
-            // ── Заливка отключена: плашка полностью прозрачная ─────
+            // ── Полупрозрачная заливка 50% ────────────────────────────────
+            Paint(Paint.ANTI_ALIAS_FLAG).also {
+                it.color = Color.argb(128, 0x22, 0x22, 0x2E); it.style = Paint.Style.FILL
+                canvas.drawRect(plotRect, it)
+            }
             // ── Тонкая чёрная рамка ───────────────────────────────────────
             Paint(Paint.ANTI_ALIAS_FLAG).also {
                 it.color = Color.BLACK; it.style = Paint.Style.STROKE; it.strokeWidth = 1.2f
