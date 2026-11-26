@@ -277,7 +277,7 @@ object GarminClient {
         if (trimmed.startsWith("{")) {
             val o = JSONObject(trimmed)
             scoreOf(o)?.let { return it }
-            o.optJSONObject("trainingReadinessList")?.let { list ->
+            o.optJSONArray("trainingReadinessList")?.let { list ->
                 for (i in 0 until list.length()) {
                     list.optJSONObject(i)?.let { scoreOf(it)?.let { s -> return s } }
                 }
