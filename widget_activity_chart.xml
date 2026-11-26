@@ -5,6 +5,6 @@
     android:id="@+id/activity_chart_image"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#CC15151C"
+    android:background="@android:color/transparent"
     android:contentDescription="@string/widget_activity_description"
     android:scaleType="fitCenter" />
